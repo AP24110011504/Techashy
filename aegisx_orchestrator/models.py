@@ -141,6 +141,13 @@ class Finding(BaseModel):
     is_uncertain: bool = False
 
 
+class DetectorFinding(BaseModel):
+    """A deterministic rule-based detector result."""
+    rule_id: str
+    severity: Severity
+    explanation: str
+    event_ids: List[str]
+    detected_at: datetime
 class RecommendedAction(BaseModel):
     action:           ContainmentAction
     rationale:        str
@@ -155,6 +162,7 @@ class InvestigationReport(BaseModel):
     summary:             str
     timeline:            List[TimelineEntry]
     findings:            List[Finding]
+    detector_findings:   List[DetectorFinding] = Field(default_factory=list)
     uncertainty:         List[str]              # explicit unknowns / conflicts
     recommended_actions: List[RecommendedAction]
     llm_augmented:       bool                  = False

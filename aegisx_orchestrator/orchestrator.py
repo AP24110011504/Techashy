@@ -23,6 +23,7 @@ from typing import List
 
 from .models import InvestigationReport, InvestigationRequest
 from .agents import detection_agent, evidence_review_agent, investigation_agent
+from detection.adapter import adapt_and_detect
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +103,28 @@ def run_investigation(request: InvestigationRequest) -> InvestigationReport:
         logger.error(msg, exc_info=True)
 
     # ── Step 4: Coordinator — merge ──────────────────────────────────────
+    # Step 3b: Independent deterministic rule detector
+    detector_findings = []
+    try:
+        detector_findings = adapt_and_detect(request.events)
+        flagged_ids = {
+            event_id
+            for finding in detector_findings
+            for event_id in finding.event_ids
+        }
+        for event in request.events:
+            if event.event_id in flagged_ids:
+                event.fast_detector_flag = True
+        trace.append(
+            f"[3b] RuleDetector: {len(detector_findings)} rule finding(s)."
+        )
+    except Exception as exc:
+        msg = f"[3b] RuleDetector FAILED: {exc}"
+        trace.append(msg)
+        uncertainty.append(
+            "Rule-based detector failed; rule findings may be incomplete."
+        )
+        logger.error(msg, exc_info=True)
     all_uncertainty = uncertainty + inv.get("uncertainty_notes", [])
     threat_level    = inv.get("severity_summary") or det.get("threat_level", "unknown")
     n_findings      = len(inv.get("findings", []))
@@ -141,6 +164,7 @@ def run_investigation(request: InvestigationRequest) -> InvestigationReport:
         summary=final_summary,
         timeline=inv.get("timeline", []),
         findings=inv.get("findings", []),
+        detector_findings=detector_findings,
         uncertainty=all_uncertainty,
         recommended_actions=inv.get("recommended_actions", []),
         llm_augmented=llm_augmented,
