@@ -23,6 +23,7 @@ import {
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 const DEFAULT_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS) || 4000;
+const MOCK_FALLBACK_ENABLED = import.meta.env.VITE_ENABLE_MOCK_FALLBACK !== 'false';
 
 // In-memory mock state machine to reflect state transitions dynamically
 class MockBackendState {
@@ -126,7 +127,7 @@ export const ConnectionMode = {
 };
 
 // Store current operational mode
-let currentMode = ConnectionMode.MOCK_MODE;
+let currentMode = ConnectionMode.DISCONNECTED;
 let listeners = [];
 
 export function subscribeConnectionState(callback) {
@@ -156,7 +157,7 @@ export function getCurrentConnectionMode() {
  * Robust fetch wrapper with timeout and retry protection
  */
 async function requestWithRetry(endpoint, options = {}, retries = 1, timeoutMs = DEFAULT_TIMEOUT_MS) {
-  // If user explicitly forced MOCK_MODE, bypass network
+  // MOCK_MODE is only an explicit override; the initial DISCONNECTED state still probes the backend.
   if (currentMode === ConnectionMode.MOCK_MODE) {
     throw new Error('MOCK_MODE_ACTIVE');
   }
@@ -190,7 +191,7 @@ async function requestWithRetry(endpoint, options = {}, retries = 1, timeoutMs =
       clearTimeout(timer);
       if (attempt === retries) {
         // Mark as disconnected or fallback to mock
-        notifyModeChange(ConnectionMode.MOCK_MODE);
+        notifyModeChange(ConnectionMode.DISCONNECTED);
         throw err;
       }
       // Wait with exponential backoff before retry
@@ -213,7 +214,8 @@ export const api = {
     try {
       const res = await requestWithRetry('/api/status');
       return { ...res.data, isMock: false };
-    } catch {
+    } catch (error) {
+      if (!MOCK_FALLBACK_ENABLED) throw error;
       await delay(250);
       return {
         status: 'healthy',
@@ -239,7 +241,8 @@ export const api = {
         body: JSON.stringify({ scenarioId, intensity })
       });
       return { ...res.data, isMock: false };
-    } catch {
+    } catch (error) {
+      if (!MOCK_FALLBACK_ENABLED) throw error;
       await delay(800);
       mockState.triggerSimulation();
       return {
@@ -252,7 +255,7 @@ export const api = {
         detectionStatus: mockState.incident.detectionStatus,
         phase: mockState.incident.phase,
         affectedAssets: mockState.incident.affectedAssets,
-        message: 'Attack scenario successfully executed. 6 telemetry events recorded, 3 agent investigations completed.',
+        message: 'Mock scenario displayed locally. No backend scenario was executed.',
         timestamp: new Date().toISOString(),
         isMock: true
       };
@@ -264,10 +267,11 @@ export const api = {
    */
   async getEvents(incidentId) {
     try {
-      const query = incidentId ? `?incidentId=${encodeURIComponent(incidentId)}` : '';
-      const res = await requestWithRetry(`/api/events${query}`);
+      const id = incidentId || mockState.incident.incidentId;
+      const res = await requestWithRetry(`/api/events/${encodeURIComponent(id)}`);
       return { ...res.data, isMock: false };
-    } catch {
+    } catch (error) {
+      if (!MOCK_FALLBACK_ENABLED) throw error;
       await delay(300);
       return {
         incidentId: mockState.incident.incidentId,
@@ -283,9 +287,11 @@ export const api = {
    */
   async getSources() {
     try {
-      const res = await requestWithRetry('/api/sources');
+      const id = mockState.incident.incidentId;
+      const res = await requestWithRetry(`/api/sources/${encodeURIComponent(id)}`);
       return { ...res.data, isMock: false };
-    } catch {
+    } catch (error) {
+      if (!MOCK_FALLBACK_ENABLED) throw error;
       await delay(300);
       return {
         sources: mockState.sources,
@@ -299,16 +305,16 @@ export const api = {
    */
   async getEvidence(incidentId) {
     try {
-      const query = incidentId ? `?incidentId=${encodeURIComponent(incidentId)}` : '';
-      const res = await requestWithRetry(`/api/evidence${query}`);
+      const id = incidentId || mockState.incident.incidentId;
+      const res = await requestWithRetry(`/api/evidence/${encodeURIComponent(id)}`);
       return { ...res.data, isMock: false };
-    } catch {
+    } catch (error) {
+      if (!MOCK_FALLBACK_ENABLED) throw error;
       await delay(350);
       return {
         incidentId: mockState.incident.incidentId,
-        chainValid: true,
-        immutableAuditHeight: 14092,
-        verifiedTimestamp: new Date().toISOString(),
+        chainValid: null,
+        verificationStatus: 'UNVERIFIED_MOCK_DATA',
         evidenceRecords: mockState.evidence,
         isMock: true
       };
@@ -322,10 +328,17 @@ export const api = {
     try {
       const res = await requestWithRetry('/api/investigate', {
         method: 'POST',
-        body: JSON.stringify({ incidentId, scope })
+        body: JSON.stringify({
+          incident_id: incidentId,
+          events: [],
+          evidence: [],
+          requester: 'AEGISX Sentinel dashboard',
+          context_notes: `Investigation scope: ${scope}`
+        })
       });
       return { ...res.data, isMock: false };
-    } catch {
+    } catch (error) {
+      if (!MOCK_FALLBACK_ENABLED) throw error;
       await delay(600);
       return {
         incidentId: mockState.incident.incidentId,
@@ -347,11 +360,12 @@ export const api = {
         body: JSON.stringify({ query, contextIncidentId })
       });
       return { ...res.data, isMock: false };
-    } catch {
+    } catch (error) {
+      if (!MOCK_FALLBACK_ENABLED) throw error;
       await delay(500);
       // Smart matching against presets or fallback
       const preset = PRESET_VOICE_RESPONSES[query] || {
-        answer: `AEGISX Sentinel analyzed query "${query}". Active telemetry indicates threat score ${mockState.incident.threatScore}/100 across ${mockState.incident.affectedAssets.length} affected assets. Identity and EDR sensors are continuously feeding cryptographically-verified telemetry into the investigation buffer.`,
+        answer: `AEGISX Sentinel analyzed query "${query}". Active telemetry indicates threat score ${mockState.incident.threatScore}/100 across ${mockState.incident.affectedAssets.length} affected assets. This is a mock response; live sensor connectivity and evidence verification have not been confirmed.`,
         confidence: 0.91,
         suggestedActions: ["Inspect Compromised Sources", "Review Evidence Hashes", "Verify Merkle Proofs"]
       };
@@ -371,24 +385,56 @@ export const api = {
    * POST /api/actions/approve
    */
   async approveAction(actionId, decision = 'APPROVED', analystNote = '') {
+    const normalizedDecision = String(decision).toUpperCase();
+    if (!['APPROVED', 'REJECTED'].includes(normalizedDecision)) {
+      throw new Error('Decision must be APPROVED or REJECTED.');
+    }
+
+    // The backend contract exposes an approval request, not a rejection endpoint.
+    // Never send a rejection through the approval endpoint.
+    if (normalizedDecision === 'REJECTED') {
+      if (!MOCK_FALLBACK_ENABLED) {
+        throw new Error('The backend does not expose a rejection endpoint.');
+      }
+      await delay(200);
+      mockState.approveAction('REJECTED', analystNote);
+      return {
+        success: true,
+        actionId: mockState.containmentAction.actionId || actionId,
+        status: 'REJECTED',
+        outcome: 'Rejection recorded in local demo state only; no backend action was performed.',
+        isMock: true
+      };
+    }
+
     try {
       const res = await requestWithRetry('/api/actions/approve', {
         method: 'POST',
-        body: JSON.stringify({ actionId, decision, analystNote })
+        body: JSON.stringify({
+          incident_id: mockState.incident.incidentId,
+          action: 'isolate_endpoint',
+          target: 'prod-db-replica-02',
+          approved_by: import.meta.env.VITE_APPROVER_ID || 'LEAD_SOC_ANALYST',
+          justification: analystNote.trim() || 'No justification supplied'
+        })
       });
-      return { ...res.data, isMock: false };
-    } catch {
-      await delay(650);
-      mockState.approveAction(decision, analystNote);
+
+      return {
+        ...res.data,
+        status: res.data.status || 'APPROVED',
+        outcome: res.data.simulation_note || 'Approval recorded; verify backend status.',
+        isMock: false
+      };
+    } catch (error) {
+      if (!MOCK_FALLBACK_ENABLED) throw error;
+      await delay(300);
+      mockState.approveAction('APPROVED', analystNote);
       return {
         success: true,
         actionId: mockState.containmentAction.actionId,
         actionName: mockState.containmentAction.actionName,
-        status: mockState.containmentAction.status,
-        riskReduction: mockState.containmentAction.riskReduction,
-        potentialImpact: mockState.containmentAction.potentialImpact,
-        executedAt: mockState.containmentAction.executedAt || new Date().toISOString(),
-        outcome: mockState.containmentAction.outcome || 'Action recorded.',
+        status: 'APPROVED',
+        outcome: 'Demo approval recorded locally only; no real containment was performed.',
         isMock: true
       };
     }
@@ -401,7 +447,8 @@ export const api = {
     try {
       const res = await requestWithRetry('/api/audit');
       return { records: res.data.records || res.data, isMock: false };
-    } catch {
+    } catch (error) {
+      if (!MOCK_FALLBACK_ENABLED) throw error;
       await delay(300);
       return {
         records: mockState.auditLog,
@@ -417,7 +464,8 @@ export const api = {
     try {
       const res = await requestWithRetry('/api/containment/hosts');
       return { hosts: res.data.hosts || res.data, isMock: false };
-    } catch {
+    } catch (error) {
+      if (!MOCK_FALLBACK_ENABLED) throw error;
       await delay(250);
       return {
         hosts: mockState.containmentHosts,
@@ -433,7 +481,8 @@ export const api = {
     try {
       const res = await requestWithRetry('/api/incidents');
       return { incidents: res.data.incidents || res.data, isMock: false };
-    } catch {
+    } catch (error) {
+      if (!MOCK_FALLBACK_ENABLED) throw error;
       await delay(250);
       return {
         incidents: mockState.incidents,
@@ -449,7 +498,8 @@ export const api = {
     try {
       const res = await requestWithRetry('/api/forensics/artifacts');
       return { artifacts: res.data.artifacts || res.data, isMock: false };
-    } catch {
+    } catch (error) {
+      if (!MOCK_FALLBACK_ENABLED) throw error;
       await delay(300);
       return {
         artifacts: mockState.forensicArtifacts,
@@ -468,7 +518,8 @@ export const api = {
         body: JSON.stringify({ reason })
       });
       return { ...res.data, isMock: false };
-    } catch {
+    } catch (error) {
+      if (!MOCK_FALLBACK_ENABLED) throw error;
       await delay(700);
       mockState.executeEmergencyLockdown();
       return {

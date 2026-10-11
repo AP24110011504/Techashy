@@ -46,7 +46,7 @@ export function ContainmentPage({
       setActionFeedback({
         type: pendingDecision === 'APPROVED' ? 'success' : 'info',
         message: pendingDecision === 'APPROVED'
-          ? 'Containment action ACT-ISO-PROD-DB executed. Network interfaces severed and IAM credentials revoked.'
+          ? 'Containment approval recorded as simulated. No real network interfaces or IAM credentials were changed.'
           : 'Containment proposal rejected by SOC lead.'
       });
     }
@@ -58,7 +58,7 @@ export function ContainmentPage({
       const res = await onTriggerEmergencyLockdown('Emergency enterprise lockdown engaged by Lead Analyst');
       setActionFeedback({
         type: 'danger',
-        message: 'EMERGENCY LOCKDOWN ACTIVE: All non-essential interfaces severed across corporate VPC.'
+        message: 'SIMULATED: Emergency lockdown request recorded. No real network interfaces were changed.'
       });
     }
   };
@@ -66,7 +66,7 @@ export function ContainmentPage({
   const handleHostAction = (hostname, actionName) => {
     setActionFeedback({
       type: 'info',
-      message: `${actionName} command dispatched to host ${hostname}. Agent telemetry verified.`
+      message: `SIMULATED: ${actionName} request recorded for host ${hostname}. No host action was executed.`
     });
   };
 

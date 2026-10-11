@@ -32,7 +32,7 @@ export function useSentinel() {
   const [isApproving, setIsApproving] = useState(false);
   const [isLockingDown, setIsLockingDown] = useState(false);
   const [isQueryingVoice, setIsQueryingVoice] = useState(false);
-  const [connectionMode, setConnectionMode] = useState(ConnectionMode.MOCK_MODE);
+  const [connectionMode, setConnectionMode] = useState(ConnectionMode.DISCONNECTED);
   const [isMockData, setIsMockData] = useState(true);
   const [error, setError] = useState(null);
 
@@ -40,7 +40,7 @@ export function useSentinel() {
   useEffect(() => {
     const unsubscribe = subscribeConnectionState(mode => {
       setConnectionMode(mode);
-      setIsMockData(mode === ConnectionMode.MOCK_MODE);
+      setIsMockData(mode !== ConnectionMode.CONNECTED);
     });
     return unsubscribe;
   }, []);
