@@ -1,31 +1,79 @@
 # AEGISX Sentinel — Engineering & Team Contract
-**Hackathon Demo & System Integration Protocol**
-**Version:** 1.0.0
-**Project Lead:** Cybersecurity Operations & AI Systems
-**Frontend Lead Role:** Single-Page React SOC Dashboard
+
+**Hackathon Demo & System Integration Protocol**  
+**Version:** 1.1.0  
+**Project:** AEGISX Sentinel — AI-Powered Cybersecurity First Responder  
+**Frontend:** React SOC Dashboard  
+**Backend:** FastAPI, multi-agent orchestrator, evidence engine, MCP server
 
 ---
 
-## 1. Project Overview & Architecture
-AEGISX Sentinel is an autonomous AI-powered cybersecurity first responder designed for Security Operations Centers (SOCs).
-Its mission is to:
-1. Detect attacks across heterogeneous telemetry sources (IAM, EDR, Firewalls, Cloud Servers, Databases).
-2. Cryptographically verify the integrity of telemetry evidence using hash chains and digital signatures to prevent tampering.
-3. Coordinate multi-agent AI investigations with specialized agent roles (Identity Sentinel, Network Recon, Forensics & Integrity).
-4. Provide natural-language SOC query capabilities via voice/text ("Ask AEGISX").
-5. Formulate human-in-the-loop containment decisions with rigorous blast-radius and impact analysis before execution.
+## 1. Project Overview
+
+AEGISX Sentinel is an AI-powered cybersecurity investigation and response platform designed for Security Operations Centers (SOCs).
+
+Its objectives are to:
+
+1. Detect suspicious activity across IAM, EDR, firewall, server, cloud, and database telemetry.
+2. Verify telemetry integrity using cryptographic hashes, digital signatures, and a hash-linked evidence ledger.
+3. Coordinate multi-agent investigations and correlate events with evidence.
+4. Provide natural-language investigation through voice and text using Ask AEGISX.
+5. Present investigation results, source health, and evidence integrity in a React SOC dashboard.
+6. Support human-approved containment workflows with explicit approval and audit trails.
+
+### System architecture
+
+The project contains these major components:
+
+- **Detection:** deterministic event rules and threat scoring.
+- **Orchestration:** coordinates detection, evidence review, investigation, and reporting.
+- **Evidence engine:** canonicalization, hashing, signature verification, and ledger operations.
+- **FastAPI backend:** exposes investigation and supporting API routes.
+- **MCP server:** exposes investigation capabilities through JSON-RPC over standard input/output.
+- **React dashboard:** presents incidents, event timelines, source health, evidence verification, and containment approvals.
+
+The backend, evidence engine, MCP server, and dashboard must retain clear interfaces. Changes to shared interfaces must be communicated to all team members.
 
 ---
 
-## 2. API Schema Contract (Backend & Mock Adapter Protocol)
+## 2. API Integration Contract
 
-All frontend components communicate with the backend via the `/api` route prefix.
-If the backend is offline, unreachable, or returns network failure, the frontend **MUST** automatically activate the **Explicit MOCK MODE Adapter** and display a prominent **`MOCK DATA`** badge in the header.
+The backend and frontend currently use different API conventions. The frontend must use an API client or adapter to translate its dashboard requests into the actual backend request and response formats.
 
-### Endpoint 1: `GET /api/status`
-- **Purpose**: Real-time heartbeat and connection status of AEGISX Sentinel.
-- **Request**: `GET /api/status` (No request body).
-- **Response Schema (`200 OK`)**:
+**Do not assume that an endpoint exists merely because it is specified in this document.** Verify that the corresponding FastAPI route is registered before using it.
+
+### 2.1 Existing orchestrator API
+
+The orchestrator module exposes the following routes according to its team contract:
+
+| Method | Route | Purpose |
+|---|---|---|
+| POST | `/api/investigate` | Run a multi-agent investigation |
+| GET | `/api/events/{incident_id}` | Retrieve an incident timeline |
+| GET | `/api/sources/{incident_id}` | Retrieve source health |
+| GET | `/api/evidence/{incident_id}` | Retrieve evidence verification |
+| POST | `/api/actions/approve` | Approve a simulated containment action |
+
+The actual registered routes and their response models must be verified against `aegisx_orchestrator/api_router.py`.
+
+The MCP server is launched with:
+
+```powershell
+python -m aegisx_orchestrator.mcp_server.server
+```
+
+It communicates over standard input/output using JSON-RPC 2.0.
+
+### 2.2 Frontend dashboard API contract
+
+The dashboard uses the following normalized API interface. These routes are frontend integration requirements and must be implemented by the backend or an API adapter before the frontend treats them as available.
+
+#### Endpoint 1 — `GET /api/status`
+
+Purpose: retrieve service health and dashboard summary.
+
+Expected response:
+
 ```json
 {
   "status": "healthy",
@@ -39,16 +87,23 @@ If the backend is offline, unreachable, or returns network failure, the frontend
 }
 ```
 
-### Endpoint 2: `POST /api/scenario/run`
-- **Purpose**: Trigger an end-to-end simulated cyber-attack scenario for SOC evaluation and demo purposes.
-- **Request Schema (`POST /api/scenario/run`)**:
+Values must reflect actual backend state. If a metric is unavailable, the backend must return an explicit unavailable value or document its derivation instead of inventing a live metric.
+
+#### Endpoint 2 — `POST /api/scenario/run`
+
+Purpose: trigger an explicitly simulated attack scenario for a controlled demo.
+
+Request:
+
 ```json
 {
   "scenarioId": "attack-sim-apt29-db-breach",
   "intensity": "high"
 }
 ```
-- **Response Schema (`200 OK`)**:
+
+Expected response schema:
+
 ```json
 {
   "success": true,
@@ -59,20 +114,32 @@ If the backend is offline, unreachable, or returns network failure, the frontend
   "threatScore": 87,
   "detectionStatus": "ACTIVE_INVESTIGATION",
   "phase": "CONTAINMENT_PENDING",
-  "affectedAssets": ["auth-srv-us-east-1", "prod-db-replica-02", "iam-admin-vault"],
-  "message": "Attack scenario successfully executed. 6 telemetry events recorded, 3 agent investigations completed.",
+  "affectedAssets": [
+    "auth-srv-us-east-1",
+    "prod-db-replica-02",
+    "iam-admin-vault"
+  ],
+  "message": "Simulation completed.",
   "timestamp": "2026-10-10T11:00:15Z"
 }
 ```
 
-### Endpoint 3: `GET /api/events`
-- **Purpose**: Fetch chronological timeline events representing the attack progression.
-- **Request**: `GET /api/events?incidentId=INC-2026-9042`
-- **Response Schema (`200 OK`)**:
+All simulated records must be clearly identified as test or demo data. A simulation must not execute real containment actions.
+
+#### Endpoint 3 — `GET /api/events`
+
+Purpose: retrieve chronological incident events.
+
+Request:
+
+`GET /api/events?incidentId=INC-2026-9042`
+
+Expected response structure:
+
 ```json
 {
   "incidentId": "INC-2026-9042",
-  "total": 6,
+  "total": 1,
   "events": [
     {
       "id": "EVT-1001",
@@ -80,74 +147,23 @@ If the backend is offline, unreachable, or returns network failure, the frontend
       "relativeTime": "18m ago",
       "source": "IAM",
       "severity": "CRITICAL",
-      "description": "Anomalous multi-factor authentication bypass detected for admin_srv account from unrecognized ASN 14061.",
+      "description": "Example event description",
       "evidenceStatus": "VERIFIED",
-      "rawHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "rawHash": "actual-computed-sha256",
       "assetId": "auth-srv-us-east-1"
-    },
-    {
-      "id": "EVT-1002",
-      "timestamp": "2026-10-10T10:45:02Z",
-      "relativeTime": "15m ago",
-      "source": "IAM",
-      "severity": "HIGH",
-      "description": "Short-lived STS temporary credentials minted for role `svc_backup_admin` with elevated cross-account assume-role policy.",
-      "evidenceStatus": "VERIFIED",
-      "rawHash": "a1b2c3d4e5f67890123456789abcdef0123456789abcdef0123456789abcdef0",
-      "assetId": "iam-admin-vault"
-    },
-    {
-      "id": "EVT-1003",
-      "timestamp": "2026-10-10T10:47:33Z",
-      "relativeTime": "13m ago",
-      "source": "EDR",
-      "severity": "CRITICAL",
-      "description": "Unsigned binary `libsystemd-patch.so` injected into PostgreSQL worker process 4192 on host prod-db-replica-02.",
-      "evidenceStatus": "VERIFIED",
-      "rawHash": "7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069",
-      "assetId": "prod-db-replica-02"
-    },
-    {
-      "id": "EVT-1004",
-      "timestamp": "2026-10-10T10:51:19Z",
-      "relativeTime": "9m ago",
-      "source": "Server",
-      "severity": "HIGH",
-      "description": "Auditd triggered high-frequency READ syscalls on customer table space `/var/lib/postgresql/15/main/base/16384`.",
-      "evidenceStatus": "VERIFIED",
-      "rawHash": "4d79c6b8c9e54a019b782c57a9163273e0a12e8b9f0d1a4e7c3b2a19f8e6d5c4",
-      "assetId": "prod-db-replica-02"
-    },
-    {
-      "id": "EVT-1005",
-      "timestamp": "2026-10-10T10:54:40Z",
-      "relativeTime": "6m ago",
-      "source": "Firewall",
-      "severity": "CRITICAL",
-      "description": "Outbound encrypted TLS flow initiated on destination port 8443 to external drop-server `185.220.101.5` (Volume: 4.2 GB).",
-      "evidenceStatus": "VERIFIED",
-      "rawHash": "9b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c",
-      "assetId": "edge-gw-us-east"
-    },
-    {
-      "id": "EVT-1006",
-      "timestamp": "2026-10-10T10:56:11Z",
-      "relativeTime": "4m ago",
-      "source": "Database",
-      "severity": "HIGH",
-      "description": "Unauthorized pg_dump pipeline terminated unexpectedly after socket closure; staging archive detected in /tmp.",
-      "evidenceStatus": "PENDING",
-      "rawHash": "3f2a1b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a",
-      "assetId": "prod-db-replica-02"
     }
   ]
 }
 ```
 
-### Endpoint 4: `GET /api/sources`
-- **Purpose**: Health, trust scores, and operational status of all telemetry providers.
-- **Request**: `GET /api/sources`
-- **Response Schema (`200 OK`)**:
+The example event is illustrative only. The backend must populate the response from actual stored or explicitly simulated events.
+
+#### Endpoint 4 — `GET /api/sources`
+
+Purpose: display health and trust information for telemetry sources.
+
+Expected response structure:
+
 ```json
 {
   "sources": [
@@ -155,215 +171,400 @@ If the backend is offline, unreachable, or returns network failure, the frontend
       "id": "src-iam",
       "name": "IAM",
       "category": "Identity Provider",
-      "status": "COMPROMISED",
-      "trustScore": 42,
+      "status": "HEALTHY",
+      "trustScore": 95,
       "lastUpdated": "2026-10-10T10:58:30Z",
-      "telemetryRate": "240 events/sec",
-      "summary": "MFA anomaly flagged. Rogue session token active in US-East."
-    },
-    {
-      "id": "src-edr",
-      "name": "EDR",
-      "category": "Endpoint Detection",
-      "status": "DEGRADED",
-      "trustScore": 74,
-      "lastUpdated": "2026-10-10T10:59:12Z",
-      "telemetryRate": "1,120 events/sec",
-      "summary": "Process injection flagged on prod-db-replica-02. Agent health verified."
-    },
-    {
-      "id": "src-firewall",
-      "name": "Firewall",
-      "category": "Perimeter Defense",
-      "status": "DEGRADED",
-      "trustScore": 68,
-      "lastUpdated": "2026-10-10T10:57:45Z",
-      "telemetryRate": "15,400 packets/sec",
-      "summary": "Egress burst detected to suspicious offshore ASN."
-    },
-    {
-      "id": "src-server",
-      "name": "Server",
-      "category": "Host & Linux Auditd",
-      "status": "COMPROMISED",
-      "trustScore": 38,
-      "lastUpdated": "2026-10-10T10:56:02Z",
-      "telemetryRate": "88 events/sec",
-      "summary": "Unauthorized root privilege elevation detected."
-    },
-    {
-      "id": "src-database",
-      "name": "Database",
-      "category": "PostgreSQL Cluster",
-      "status": "DEGRADED",
-      "trustScore": 55,
-      "lastUpdated": "2026-10-10T10:55:18Z",
-      "telemetryRate": "34 queries/sec",
-      "summary": "High-volume read export attempted on customer table."
+      "telemetryRate": "unavailable",
+      "summary": "Source health information"
     }
   ]
 }
 ```
 
-### Endpoint 5: `GET /api/evidence`
-- **Purpose**: Cryptographic audit and evidence integrity validation log.
-- **Request**: `GET /api/evidence?incidentId=INC-2026-9042`
-- **Response Schema (`200 OK`)**:
+The sample values must not be presented as live telemetry unless obtained from a real source or explicitly labelled as simulation data.
+
+#### Endpoint 5 — `GET /api/evidence`
+
+Purpose: retrieve evidence integrity verification.
+
+Request:
+
+`GET /api/evidence?incidentId=INC-2026-9042`
+
+Expected response structure:
+
 ```json
 {
   "incidentId": "INC-2026-9042",
   "chainValid": true,
-  "immutableAuditHeight": 14092,
+  "immutableAuditHeight": null,
   "verifiedTimestamp": "2026-10-10T10:59:40Z",
   "evidenceRecords": [
     {
       "id": "EVD-4091",
-      "source": "EDR Agent #09",
+      "source": "EDR",
       "hashVerification": "VALID",
-      "expectedHash": "7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069",
-      "calculatedHash": "7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069",
+      "expectedHash": "actual-expected-hash",
+      "calculatedHash": "actual-calculated-hash",
       "signatureVerification": "VALID",
-      "signerKeyId": "ECDSA-P256-EDR-SECKEY-88",
+      "signerKeyId": "actual-key-id",
       "integrityResult": "UNALTERED",
       "verificationTimestamp": "2026-10-10T10:54:10Z",
-      "chainProof": "merkle-root:0x49f1a0b3e"
-    },
-    {
-      "id": "EVD-4092",
-      "source": "IAM Okta Connector",
-      "hashVerification": "VALID",
-      "expectedHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "calculatedHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "signatureVerification": "VALID",
-      "signerKeyId": "RSA-4096-IAM-SECKEY-02",
-      "integrityResult": "UNALTERED",
-      "verificationTimestamp": "2026-10-10T10:55:02Z",
-      "chainProof": "merkle-root:0x49f1a0b3f"
-    },
-    {
-      "id": "EVD-4093",
-      "source": "Palo Alto Firewall Syslog",
-      "hashVerification": "VALID",
-      "expectedHash": "9b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c",
-      "calculatedHash": "9b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c",
-      "signatureVerification": "VALID",
-      "signerKeyId": "ECDSA-P256-FW-SECKEY-14",
-      "integrityResult": "UNALTERED",
-      "verificationTimestamp": "2026-10-10T10:57:48Z",
-      "chainProof": "merkle-root:0x49f1a0b40"
+      "chainProof": null
     }
   ]
 }
 ```
 
-### Endpoint 6: `POST /api/investigate`
-- **Purpose**: Run or retrieve multi-agent SOC investigation findings.
-- **Request Schema (`POST /api/investigate`)**:
+The API must use actual verification results. It must not manufacture signatures, hashes, chain proofs, or verification outcomes. If the underlying ledger does not provide a field, return `null` or omit the field according to the agreed schema.
+
+#### Endpoint 6 — `POST /api/investigate`
+
+Purpose: run or retrieve a multi-agent investigation.
+
+The existing orchestrator contract accepts an `InvestigationRequest` containing an incident identifier, events, and evidence. Its response is an `InvestigationReport`.
+
+Example request:
+
+```json
+{
+  "incident_id": "INC-2026-9042",
+  "events": [],
+  "evidence": []
+}
+```
+
+The dashboard may use a simpler request:
+
 ```json
 {
   "incidentId": "INC-2026-9042",
   "scope": "full"
 }
 ```
-- **Response Schema (`200 OK`)**:
-```json
-{
-  "incidentId": "INC-2026-9042",
-  "analyzedAt": "2026-10-10T10:58:05Z",
-  "consensusConfidence": 0.93,
-  "findings": [
-    {
-      "agentName": "Identity Sentinel Agent",
-      "finding": "Credential stuffing followed by privilege escalation using compromised token service account `svc_backup_admin`.",
-      "confidence": 0.94,
-      "supportingEventIds": ["EVT-1001", "EVT-1002"],
-      "uncertaintyNotes": "Origin IP mapped to commercial VPN exit node; geo-spoofing probable.",
-      "recommendation": "Revoke active OAuth tokens and invalidate IAM session credentials immediately."
-    },
-    {
-      "agentName": "Network Recon Agent",
-      "finding": "Outbound encrypted TLS traffic on non-standard port 8443 towards unknown external IP 185.220.101.5.",
-      "confidence": 0.89,
-      "supportingEventIds": ["EVT-1003", "EVT-1005"],
-      "uncertaintyNotes": "Packet inspection limited due to end-to-end encryption certificate pinning.",
-      "recommendation": "Deploy egress DNS sinkhole and quarantine port 8443 on edge gateway."
-    },
-    {
-      "agentName": "Forensics & Integrity Agent",
-      "finding": "Cryptographic signature on PostgreSQL dump audit log confirmed authentic; 4.2GB customer table egress underway.",
-      "confidence": 0.98,
-      "supportingEventIds": ["EVT-1004", "EVT-1006"],
-      "uncertaintyNotes": "File deletion routine attempted on local syslog but prevented by WORM storage policy.",
-      "recommendation": "Isolate database read replica host and freeze replication pipeline."
-    }
-  ]
-}
-```
 
-### Endpoint 7: `POST /api/voice/query`
-- **Purpose**: Natural-language cybersecurity investigation assistant queries ("Ask AEGISX").
-- **Request Schema (`POST /api/voice/query`)**:
+The frontend adapter must translate the simplified dashboard request into the backend's actual request format. It must not discard required event or evidence data.
+
+The normalized dashboard response may include:
+
+- Incident identifier and analysis timestamp.
+- Investigation findings and confidence.
+- Supporting event identifiers.
+- Uncertainty notes.
+- Recommendations and approval requirements.
+
+The adapter must derive these fields from the actual investigation report. It must not fabricate agent consensus or confidence scores.
+
+#### Endpoint 7 — `POST /api/voice/query`
+
+Purpose: provide natural-language security investigation.
+
+Request:
+
 ```json
 {
   "query": "What is the blast radius and which servers are affected?",
   "contextIncidentId": "INC-2026-9042"
 }
 ```
-- **Response Schema (`200 OK`)**:
+
+Expected response structure:
+
 ```json
 {
   "query": "What is the blast radius and which servers are affected?",
-  "answer": "The blast radius is currently constrained to the US-East VPC: prod-db-replica-02 and auth-srv-us-east-1. The primary database cluster remains unbreached, but egress exfiltration is actively attempting cross-VPC traversal via IAM service credentials. Recommended containment will prevent lateral spread with zero expected customer downtime.",
-  "confidence": 0.96,
-  "suggestedActions": [
-    "Quarantine Replica Node",
-    "Revoke IAM Credentials",
-    "Freeze Replication Pipeline"
-  ],
+  "answer": "Answer generated from available investigation context.",
+  "confidence": null,
+  "suggestedActions": [],
   "timestamp": "2026-10-10T10:59:45Z"
 }
 ```
 
-### Endpoint 8: `POST /api/actions/approve`
-- **Purpose**: Human-in-the-loop approval or rejection of containment action.
-- **Request Schema (`POST /api/actions/approve`)**:
+The route must be connected to a real implemented query handler before being shown as available. Confidence may be omitted or `null` if the underlying component cannot calculate it reliably.
+
+#### Endpoint 8 — `POST /api/actions/approve`
+
+Purpose: accept a human approval decision for a proposed containment action.
+
+The existing backend contract uses:
+
+```json
+{
+  "incident_id": "INC-2026-9042",
+  "action": "block_ip",
+  "target": "203.0.113.42",
+  "approved_by": "security-lead",
+  "justification": "Source IP associated with suspicious activity"
+}
+```
+
+The dashboard may use a normalized request:
+
 ```json
 {
   "actionId": "ACT-ISO-PROD-DB",
   "decision": "APPROVED",
-  "analystNote": "Approved containment under SOC SOP-402 by Lead Analyst."
+  "analystNote": "Approved after investigation review."
 }
 ```
-- **Response Schema (`200 OK`)**:
-```json
-{
-  "success": true,
-  "actionId": "ACT-ISO-PROD-DB",
-  "actionName": "Isolate Database Read Replica and Revoke IAM Session",
-  "status": "EXECUTED",
-  "riskReduction": "85%",
-  "potentialImpact": "Read queries redirected to backup cluster. Expected latency increase < 45ms.",
-  "executedAt": "2026-10-10T11:00:22Z",
-  "outcome": "Network interface eth1 quarantined. Service token revoked. Egress traffic dropped to 0 KB/s."
-}
-```
+
+The API adapter must map these formats to the actual backend request and reject incomplete or invalid approvals.
+
+An approval is not proof that a real action was executed. The current containment implementation must be labelled as simulated unless a real, explicitly authorized integration is implemented.
 
 ---
 
-## 3. Frontend Architecture & Design Standard
-1. **Color System & Aesthetics**:
-   - Background: `#131517`
-   - Primary Card: `#1B1F24`
-   - Secondary Surface: `#20252C`
-   - Border: `#2B3139`
-   - Primary Text: `#E8EAED`
-   - Secondary Text: `#9AA3AF`
-   - Accent: `#B7C7FF`
-   - Muted Status: Emerald (Success), Amber (Warning), Rose (Critical), Slate (Offline).
-2. **Zero Hardcoded Data**:
-   - Initial state loads dynamically via API client.
-   - If backend endpoints are reachable, real data is rendered.
-   - If unreachable, the resilient Mock Mode Adapter activates with clear `MOCK DATA` indicators.
-3. **No Flashy Hacker/Matrix UI**:
-   - Crisp enterprise typography, high information density, clear visual status badges.
-   - Inspired by CrowdStrike Falcon, Linear, and Datadog.
+## 3. Frontend Architecture and Design Standards
+
+### 3.1 Visual design
+
+Use an enterprise SOC interface inspired by CrowdStrike Falcon, Linear, and Datadog.
+
+| Element | Value |
+|---|---|
+| Background | `#131517` |
+| Primary card | `#1B1F24` |
+| Secondary surface | `#20252C` |
+| Border | `#2B3139` |
+| Primary text | `#E8EAED` |
+| Secondary text | `#9AA3AF` |
+| Accent | `#B7C7FF` |
+
+Use emerald for success, amber for warnings, rose for critical alerts, and slate for offline or unavailable services.
+
+Avoid flashy Matrix-style graphics. Prioritize readable typography, clear severity indicators, dense but organized information, and responsive layouts.
+
+### 3.2 Dashboard components
+
+The dashboard should provide:
+
+1. System status and API connectivity.
+2. Incident summary and severity.
+3. Event timeline.
+4. Telemetry source health.
+5. Evidence integrity and signature verification.
+6. Investigation findings and uncertainty.
+7. Ask AEGISX text/voice query interface.
+8. Human approval for proposed containment actions.
+9. Explicit live, simulated, and offline indicators.
+
+### 3.3 No unlabelled hardcoded data
+
+- Load initial state from the API client.
+- Display actual backend responses when endpoints are reachable.
+- If the backend is unavailable, enable the explicit mock adapter.
+- Display a prominent `MOCK DATA` badge whenever mock data is shown.
+- Do not mix mock records with live records without clear labelling.
+- Do not present a successful simulated containment as a real security action.
+- Use loading, empty, error, and stale-data states for all data-driven panels.
+
+---
+
+## 4. Evidence Engine Contract
+
+The evidence engine is responsible for deterministic evidence processing.
+
+Its responsibilities include:
+
+- Canonicalizing input before hashing.
+- Computing and verifying SHA-256 hashes.
+- Signing and verifying evidence using supported digital-signature algorithms.
+- Recording evidence in the hash-linked ledger.
+- Verifying ledger links and reporting integrity failures.
+- Returning explicit unknown, invalid, and conflicting states.
+
+The engine currently includes canonicalization, integrity, signatures, and ledger modules. Their presence does not imply durable storage or complete API integration.
+
+### Evidence interface
+
+The orchestrator consumes `EvidenceRecord` objects from the shared models.
+
+Example:
+
+```python
+from datetime import datetime, timezone
+
+from aegisx_orchestrator.models import (
+    EvidenceRecord,
+    VerificationStatus,
+)
+
+record = EvidenceRecord(
+    evidence_id="EVI-001",
+    event_id="EVT-001",
+    sha256_hash="<actual-computed-hash>",
+    expected_hash="<stored-reference-hash>",
+    signature_valid=True,
+    verification_status=VerificationStatus.VERIFIED,
+    verified_at=datetime.now(timezone.utc),
+)
+```
+
+This example illustrates the interface only. Production values must be generated and verified by the cryptographic code, not copied from the example.
+
+### Safety requirements
+
+- The orchestrator must not fabricate evidence-verification results.
+- Missing evidence must remain explicitly missing or unknown.
+- Invalid signatures and hash mismatches must be reported.
+- Raw logs must remain untrusted input.
+- Raw logs must never be sent to the LLM.
+- LLM output must not overwrite deterministic verdict fields.
+- Ledger verification must report broken or inconsistent links.
+- Persistence guarantees must be documented accurately.
+
+---
+
+## 5. Detection and Orchestration Contract
+
+The orchestrator coordinates detection, evidence review, investigation, and reporting.
+
+The deterministic detector currently defines these rule types:
+
+1. Failed-login bursts.
+2. Privileged access followed by database activity.
+3. Stale EDR heartbeat.
+
+The adapter currently maps supported failed-login events from the orchestration event schema into the detector's input format.
+
+Additional rules must not be treated as integrated until the event mappings and tests are implemented.
+
+### Detector findings
+
+Rule-based findings must remain separate from evidence-correlated `Finding` objects.
+
+The investigation report contains a dedicated `detector_findings` field. The adapter must preserve the detector's actual rule identifier, severity, explanation, event IDs, and detection timestamp.
+
+### Failure isolation
+
+- Each agent must be isolated with appropriate error handling.
+- A detector failure must be recorded in the trace and uncertainty.
+- A failure in one component should not silently fabricate successful results.
+- Detector flags must be based on actual rule findings.
+- The existing deterministic detector implementation must not be changed without coordinating the change with its owner.
+
+---
+
+## 6. MCP Server Contract
+
+The MCP server runs as a standalone stdio process:
+
+```powershell
+python -m aegisx_orchestrator.mcp_server.server
+```
+
+It uses JSON-RPC 2.0 over standard input/output.
+
+The existing tool set includes:
+
+- `get_incident_events`
+- `get_source_health`
+- `get_evidence_verification`
+- `get_attack_timeline`
+- `approve_containment_action`
+
+The MCP server must:
+
+- Return tool results from actual application state.
+- Validate tool arguments.
+- Handle unknown tools and malformed requests.
+- Keep diagnostic logging off the protocol's standard-output stream.
+- Apply the same approval and audit requirements as the HTTP API.
+- Clearly label simulated actions.
+- Avoid reporting successful execution when an operation failed.
+
+End-to-end MCP client connectivity and complete workflow validation must be tested separately.
+
+---
+
+## 7. Containment Approval and Safety
+
+Supported action values in the existing backend contract are:
+
+- `block_ip`
+- `disable_account`
+- `isolate_endpoint`
+- `revoke_session`
+- `alert_team`
+- `increase_log_verbosity`
+
+The backend must reject actions outside its allow-list.
+
+Human approval requires an approver identity and justification. Every approval attempt must be audited.
+
+The current simulated containment implementation must not be represented as a production firewall, IAM, or endpoint-control integration.
+
+Real containment integrations require explicit authorization, target validation, failure handling, audit logging, and a documented rollback or recovery procedure.
+
+---
+
+## 8. Team Responsibilities and Integration Rules
+
+### Person 1 — Edge Detection / Backend Integration
+
+- Own edge-detection integration.
+- Maintain the shared event schema.
+- Connect the appropriate FastAPI application routes.
+- Coordinate changes to detection and API contracts.
+
+### Person 2 — Cryptography / Evidence
+
+- Own evidence integrity and cryptographic verification.
+- Produce deterministic evidence-verification results.
+- Maintain hash, signature, and ledger tests.
+- Document persistence and verification guarantees.
+
+### Person 3 — Orchestration / MCP
+
+- Own the multi-agent orchestrator.
+- Maintain the MCP server and tool interfaces.
+- Integrate detector findings into investigation reports.
+- Preserve uncertainty and failure isolation.
+- Maintain the approval and audit workflow.
+
+### Frontend lead — React SOC Dashboard
+
+- Implement the dashboard UI and API client.
+- Follow the frontend design standards.
+- Map frontend requests to actual backend schemas.
+- Implement explicit mock mode and visible mock-data labels.
+- Display incidents, events, evidence, investigation findings, and approval states accurately.
+
+### Shared integration rules
+
+1. Changes to shared models or routes must be communicated to the affected team members.
+2. No team member should silently change a shared request or response schema.
+3. Preserve unrelated working functionality when resolving merge conflicts.
+4. Run the relevant tests before committing.
+5. Do not merge code that depends on undocumented mock responses.
+6. Document incomplete routes and unimplemented features.
+7. Do not claim an end-to-end integration is complete until it has been exercised.
+
+---
+
+## 9. Testing and Completion Criteria
+
+The following areas require independent verification:
+
+- Existing automated tests pass.
+- All supported detector rules work through the adapter.
+- The evidence engine verifies hashes, signatures, and ledger links.
+- Ledger persistence behaviour is documented and tested.
+- Dashboard API routes match the actual backend contracts.
+- Mock mode is clearly labelled and does not masquerade as live data.
+- The dashboard can load and render actual API responses.
+- The MCP server can be launched and exercised by an MCP client.
+- Approval validation and audit logging work as expected.
+- Simulated containment is clearly distinguished from real execution.
+
+Passing unit tests is necessary but does not, by itself, prove that every API, dashboard, and MCP workflow is connected.
+
+---
+
+## 10. Final Integration Principle
+
+AEGISX Sentinel must distinguish between **observed facts, deterministic findings, cryptographically verified evidence, AI-generated analysis, mock data, and simulated actions**.
+
+No component may silently promote an unknown or simulated result to a verified or executed result.
+
+The frontend, backend, evidence engine, detector, orchestrator, and MCP server must share documented interfaces and preserve these safety guarantees throughout the investigation lifecycle.
