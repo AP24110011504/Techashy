@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AEGISX Sentinel SOC Dashboard</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Top Header -->
+    <header class="app-header">
+      <div class="logo-group">
+        <img src="icons/icon48.png" alt="AEGISX" class="app-logo">
+        <div>
+          <h1 class="brand-title">AEGISX <span class="cyan-text">SENTINEL</span></h1>
+          <p class="brand-subtitle">AI-POWERED CYBER EVIDENCE & INVESTIGATION SOC</p>
+        </div>
+      </div>
+      <div class="header-controls">
+        <div id="connectionStatus" class="status-pill status-offline">
+          <span class="pulse-dot"></span>
+          <span id="connectionText">CONNECTING...</span>
+        </div>
+        <span class="safe-badge" title="Controlled simulation environment — zero real system modifications">SIMULATION SAFE</span>
+        <button id="btnRefresh" class="btn-icon" title="Refresh Telemetry">⟳</button>
+      </div>
+    </header>
+
+    <!-- Global Offline Warning Banner -->
+    <div id="offlineBanner" class="alert-banner alert-danger hidden">
+      <span>⚠️ <strong>Backend Unreachable:</strong> Cannot connect to AEGISX Sentinel API at <code id="apiBaseLabel">http://127.0.0.1:8000</code>. Start the server using <code>python -m sentinel.main</code>.</span>
+      <button id="btnRetryConn" class="btn btn-sm btn-outline">Retry</button>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <nav class="nav-tabs">
+      <button class="nav-tab active" data-tab="tab-dashboard">
+        <span class="tab-icon">📊</span> Overview
+      </button>
+      <button class="nav-tab" data-tab="tab-investigate">
+        <span class="tab-icon">🧠</span> AI Investigation
+      </button>
+      <button class="nav-tab" data-tab="tab-simulator">
+        <span class="tab-icon">⚡</span> Incident Simulator
+      </button>
+      <button class="nav-tab" data-tab="tab-evidence">
+        <span class="tab-icon">🔒</span> Evidence Ledger
+      </button>
+      <button class="nav-tab" data-tab="tab-approvals">
+        <span class="tab-icon">🛡️</span> Approvals
+        <span id="pendingBadge" class="badge-count hidden">0</span>
+      </button>
+      <button class="nav-tab" data-tab="tab-voice">
+        <span class="tab-icon">🎙️</span> Voice SOC
+      </button>
+    </nav>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+
+      <!-- TAB 1: DASHBOARD -->
+      <section id="tab-dashboard" class="tab-panel active">
+        <!-- Metric Cards -->
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <span class="metric-label">TOTAL EVENTS</span>
+            <span id="metricTotalEvents" class="metric-value">--</span>
+            <span class="metric-sub">Stored in SQLite</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">HIGH / CRITICAL</span>
+            <span id="metricHighCrit" class="metric-value text-red">--</span>
+            <span class="metric-sub">Active alerts</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">EVIDENCE INTEGRITY</span>
+            <span id="metricEvidenceStatus" class="metric-value text-cyan">--</span>
+            <span class="metric-sub">SHA-256 Merkle Chain</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">TELEMETRY SENSORS</span>
+            <span id="metricSourcesCount" class="metric-value">--</span>
+            <span class="metric-sub">Active data feeds</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">PENDING APPROVALS</span>
+            <span id="metricPendingActions" class="metric-value text-amber">--</span>
+            <span class="metric-sub">Human-in-the-loop</span>
+          </div>
+        </div>
+
+        <!-- Severity Distribution Breakdown -->
+        <div class="panel-box">
+          <div class="panel-header">
+            <h3>Security Event Severity Distribution</h3>
+            <span class="panel-sub" id="severityCountsText">Calculating...</span>
+          </div>
+          <div class="severity-bar">
+            <div id="sevBarCrit" class="bar-seg seg-crit" style="width: 0%" title="Critical"></div>
+            <div id="sevBarHigh" class="bar-seg seg-high" style="width: 0%" title="High"></div>
+            <div id="sevBarMed" class="bar-seg seg-med" style="width: 0%" title="Medium"></div>
+            <div id="sevBarLow" class="bar-seg seg-low" style="width: 0%" title="Low"></div>
+            <div id="sevBarInfo" class="bar-seg seg-info" style="width: 100%" title="Info"></div>
+          </div>
+        </div>
+
+        <!-- Two Column: Telemetry Feeds & Recent Events -->
+        <div class="two-col-grid">
+          <!-- Left: Telemetry Sensors -->
+          <div class="panel-box">
+            <div class="panel-header">
+              <h3>Telemetry Sources</h3>
+              <span id="sourcesSummary" class="panel-sub">0 registered</span>
+            </div>
+            <div class="table-container small-table">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Source</th>
+                    <th>Host</th>
+                    <th>Events</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="sourcesTableBody">
+                  <tr><td colspan="4" class="text-center text-muted">No telemetry feeds recorded.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Right: Recent Security Events -->
+          <div class="panel-box">
+            <div class="panel-header">
+              <h3>Live Security Events</h3>
+              <div class="filter-controls">
+                <select id="eventSeverityFilter" class="form-select form-select-sm">
+                  <option value="">All Severities</option>
+                  <option value="critical">Critical</option>
+                  <option value="high">High</option>
+                  <option value="medium">Medium</option>
+                  <option value="low">Low</option>
+                  <option value="info">Info</option>
+                </select>
+              </div>
+            </div>
+            <div class="table-container small-table">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Sev</th>
+                    <th>Type</th>
+                    <th>Host</th>
+                    <th>Message</th>
+                  </tr>
+                </thead>
+                <tbody id="eventsTableBody">
+                  <tr><td colspan="5" class="text-center text-muted">No events available.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 2: AI INVESTIGATION -->
+      <section id="tab-investigate" class="tab-panel">
+        <div class="panel-box">
+          <div class="panel-header">
+            <h3>Multi-Agent Cyber Incident Investigation</h3>
+            <span class="panel-sub">Triage Agent + Evidence Agent + Threat Hunter Agent</span>
+          </div>
+          <div class="investigation-form">
+            <div class="form-row">
+              <input type="text" id="invQueryInput" class="form-input" placeholder="e.g. Investigate brute force and database exfiltration on srv-prod-db01" value="Investigate suspicious login and database exfiltration on srv-prod-db01">
+              <select id="invFocusSelect" class="form-select">
+                <option value="all">Full Multi-Agent</option>
+                <option value="triage">Triage Only</option>
+                <option value="evidence">Evidence Audit</option>
+                <option value="threat_hunting">Threat Hunting</option>
+              </select>
+              <button id="btnRunInvestigation" class="btn btn-primary">
+                <span id="invBtnText">Investigate</span>
+                <span id="invSpinner" class="spinner hidden"></span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Investigation Results Container -->
+        <div id="investigationResults" class="hidden">
+          <!-- Summary Banner -->
+          <div class="result-summary-card">
+            <div class="summary-meta">
+              <span class="summary-title" id="invSummaryText">Investigation Analysis Complete</span>
+              <div class="badge-row">
+                <span id="invConfidenceBadge" class="badge badge-cyan">Confidence: 94%</span>
+                <span id="invEvidenceBadge" class="badge badge-green">Evidence: VERIFIED</span>
+                <span id="invIdBadge" class="badge badge-slate">ID: inv-01</span>
+              </div>
+            </div>
+            <div class="mitre-tags-wrapper">
+              <span class="tag-label">MITRE ATT&CK:</span>
+              <div id="invMitreTags" class="tag-list"></div>
+            </div>
+          </div>
+
+          <!-- Agent Verdicts Grid -->
+          <div class="agent-cards-grid">
+            <div class="agent-card">
+              <div class="agent-header">
+                <span class="agent-role">TRIAGE AGENT</span>
+                <span class="agent-score" id="triageScore">94%</span>
+              </div>
+              <p id="triageVerdict" class="agent-desc">Assessing incident criticality and MITRE mapping...</p>
+            </div>
+            <div class="agent-card">
+              <div class="agent-header">
+                <span class="agent-role">EVIDENCE AGENT</span>
+                <span class="agent-score" id="evidenceScore">99%</span>
+              </div>
+              <p id="evidenceVerdict" class="agent-desc">Auditing cryptographic signatures and chain blocks...</p>
+            </div>
+            <div class="agent-card">
+              <div class="agent-header">
+                <span class="agent-role">THREAT HUNTER AGENT</span>
+                <span class="agent-score" id="hunterScore">88%</span>
+              </div>
+              <p id="hunterVerdict" class="agent-desc">Correlating attacker progression and blast radius...</p>
+            </div>
+          </div>
+
+          <!-- Timeline -->
+          <div class="panel-box">
+            <div class="panel-header">
+              <h3>Correlated Event Timeline</h3>
+              <span id="timelineCount" class="panel-sub">0 events</span>
+            </div>
+            <div class="timeline-container" id="timelineList"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 3: INCIDENT SIMULATOR -->
+      <section id="tab-simulator" class="tab-panel">
+        <div class="panel-box">
+          <div class="panel-header">
+            <div>
+              <h3>Cyber Incident Scenario Simulator</h3>
+              <p class="panel-desc">Controlled, non-destructive cyber attack demonstration covering full kill-chain and log tampering detection.</p>
+            </div>
+          </div>
+
+          <div class="simulation-controls-row">
+            <div class="form-group">
+              <label>Target Host</label>
+              <input type="text" id="simHostInput" class="form-input" value="srv-prod-db01">
+            </div>
+            <div class="form-group">
+              <label>Target Account</label>
+              <input type="text" id="simAccountInput" class="form-input" value="admin">
+            </div>
+            <div class="form-group">
+              <label>Scenario Template</label>
+              <select id="simScenarioSelect" class="form-select">
+                <option value="APT_INTRUSION_AND_TAMPER">APT Intrusion & Evidence Tamper</option>
+              </select>
+            </div>
+            <div class="form-group form-btn-align">
+              <button id="btnRunScenario" class="btn btn-warning">
+                <span id="simBtnText">⚡ Run Safe Simulation</span>
+                <span id="simSpinner" class="spinner hidden"></span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 5-Stage Visual Workflow -->
+          <div class="stages-workflow">
+            <div class="stage-step" id="stage1">
+              <div class="step-num">1</div>
+              <div class="step-content">
+                <strong>Suspicious Login Burst</strong>
+                <span>5 rapid failed SSH logins (198.51.100.42)</span>
+              </div>
+            </div>
+            <div class="stage-step" id="stage2">
+              <div class="step-num">2</div>
+              <div class="step-content">
+                <strong>Network Egress Anomaly</strong>
+                <span>High-volume egress to 203.0.113.88:4444</span>
+              </div>
+            </div>
+            <div class="stage-step" id="stage3">
+              <div class="step-num">3</div>
+              <div class="step-content">
+                <strong>Privileged DB Access</strong>
+                <span>Sudo escalation + customer PII query</span>
+              </div>
+            </div>
+            <div class="stage-step" id="stage4">
+              <div class="step-num">4</div>
+              <div class="step-content">
+                <strong>Sensor Heartbeat Loss</strong>
+                <span>EDR heartbeat stale > 10 min overdue</span>
+              </div>
+            </div>
+            <div class="stage-step" id="stage5">
+              <div class="step-num">5</div>
+              <div class="step-content">
+                <strong>Simulated Log Tampering</strong>
+                <span>Database record altered after signing</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Simulation Results Container -->
+        <div id="simResultsContainer" class="hidden">
+          <div class="panel-box">
+            <div class="panel-header">
+              <h3>Simulation Execution Results</h3>
+              <span id="simResultStatus" class="badge badge-green">COMPLETED</span>
+            </div>
+            <div class="sim-results-grid">
+              <div class="sim-stat">
+                <span class="label">Events Generated</span>
+                <span id="simEventsCount" class="value text-cyan">8</span>
+              </div>
+              <div class="sim-stat">
+                <span class="label">Detection Rules Triggered</span>
+                <span id="simFindingsCount" class="value text-amber">3</span>
+              </div>
+              <div class="sim-stat">
+                <span class="label">Evidence Tamper Caught</span>
+                <span id="simTamperAlert" class="value text-red">YES</span>
+              </div>
+              <div class="sim-stat">
+                <span class="label">Actions Staged</span>
+                <span id="simActionsCount" class="value text-green">4</span>
+              </div>
+            </div>
+
+            <!-- Triggered Rules Box -->
+            <div class="findings-box">
+              <h4>Triggered Local Detection Rules (detector.py):</h4>
+              <ul id="simFindingsList" class="findings-list"></ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 4: EVIDENCE LEDGER -->
+      <section id="tab-evidence" class="tab-panel">
+        <!-- Integrity Audit Banner -->
+        <div id="evidenceIntegrityBanner" class="evidence-banner banner-valid">
+          <div class="banner-icon" id="evidenceBannerIcon">🛡️</div>
+          <div>
+            <h3 id="evidenceBannerTitle">Cryptographic Evidence Ledger: VERIFIED</h3>
+            <p id="evidenceBannerSubtitle">All SHA-256 canonical event hashes and HMAC signatures verified intact across Merkle chain blocks.</p>
+          </div>
+        </div>
+
+        <!-- Evidence Violations Alert (Shown if tampering detected) -->
+        <div id="tamperViolationsAlert" class="alert-banner alert-danger hidden">
+          <div>
+            <strong>⚠️ CRITICAL TAMPER ALERT:</strong> Log alteration or broken block linkage detected!
+            <div id="tamperViolationsList" class="violations-details"></div>
+          </div>
+        </div>
+
+        <div class="panel-box">
+          <div class="panel-header">
+            <h3>Evidence Ledger Blocks</h3>
+            <span id="evidenceBlocksTotal" class="panel-sub">0 blocks sealed</span>
+          </div>
+          <div class="table-container">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Evidence ID</th>
+                  <th>Event ID</th>
+                  <th>Canonical Hash</th>
+                  <th>Signature</th>
+                  <th>Chain Hash</th>
+                  <th>Timestamp</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="evidenceTableBody">
+                <tr><td colspan="7" class="text-center text-muted">No evidence blocks recorded.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 5: RESPONSE APPROVALS -->
+      <section id="tab-approvals" class="tab-panel">
+        <div class="safety-banner">
+          <span class="shield-icon">🛡️</span>
+          <div>
+            <strong>HUMAN-IN-THE-LOOP CONTROL MANDATE:</strong>
+            All simulated response containment actions require explicit operator review. Under no circumstances will automated actions execute without operator authorization. Zero real-system changes occur.
+          </div>
+        </div>
+
+        <div class="panel-box">
+          <div class="panel-header">
+            <h3>Pending Response Actions Awaiting Operator Decision</h3>
+            <span id="approvalsPendingCount" class="badge badge-amber">0 Pending</span>
+          </div>
+
+          <div id="pendingActionsList" class="actions-list-container">
+            <div class="empty-state">No response actions pending authorization.</div>
+          </div>
+        </div>
+
+        <!-- History of Decisions -->
+        <div class="panel-box">
+          <div class="panel-header">
+            <h3>Action Decision Audit Trail</h3>
+            <span id="actionsHistoryCount" class="panel-sub">0 decided</span>
+          </div>
+          <div class="table-container small-table">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Action ID</th>
+                  <th>Type</th>
+                  <th>Target</th>
+                  <th>Status</th>
+                  <th>Approver</th>
+                  <th>Decision Time</th>
+                  <th>Simulated Log</th>
+                </tr>
+              </thead>
+              <tbody id="actionsHistoryTableBody">
+                <tr><td colspan="7" class="text-center text-muted">No decided actions in history.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 6: VOICE SOC -->
+      <section id="tab-voice" class="tab-panel">
+        <div class="panel-box">
+          <div class="panel-header">
+            <div>
+              <h3>Natural Language Voice & Text SOC Assistant</h3>
+              <p class="panel-desc">Hands-free verbal interface for SOC commanders and incident responders.</p>
+            </div>
+          </div>
+
+          <!-- Suggested Query Pills -->
+          <div class="query-pills-row">
+            <span class="pill-label">Quick Queries:</span>
+            <button class="query-pill" data-query="Give me a system status overview">System Overview</button>
+            <button class="query-pill" data-query="Audit the evidence ledger for tampering">Audit Evidence</button>
+            <button class="query-pill" data-query="What actions require operator approval?">Pending Approvals</button>
+            <button class="query-pill" data-query="What high or critical security incidents occurred?">Critical Alerts</button>
+          </div>
+
+          <!-- Voice Input Box -->
+          <div class="voice-input-wrapper">
+            <input type="text" id="voiceQueryInput" class="form-input" placeholder="Type a query or select a suggestion above..." value="Audit the evidence ledger for tampering">
+            <button id="btnVoiceSubmit" class="btn btn-primary">
+              <span id="voiceBtnText">🎙️ Query SOC</span>
+              <span id="voiceSpinner" class="spinner hidden"></span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Voice Response Card -->
+        <div id="voiceResponseCard" class="hidden">
+          <div class="voice-bubble-card">
+            <div class="bubble-header">
+              <span class="bubble-tag">SYNTHESIZED VERBAL RESPONSE</span>
+              <button id="btnPlayTTS" class="btn btn-sm btn-outline" title="Play audio via speech synthesis">🔊 Speak Audio</button>
+            </div>
+            <p id="voiceSpeechText" class="speech-quote">"Loading response..."</p>
+            <div class="bubble-meta">
+              <span class="meta-tag" id="voiceIntentTag">Intent: status_summary</span>
+              <span class="meta-tag" id="voiceQueryEcho">Echo: query</span>
+            </div>
+          </div>
+
+          <!-- Structured Payload Box -->
+          <div class="panel-box">
+            <div class="panel-header">
+              <h3>Structured Payload Data</h3>
+            </div>
+            <pre id="voicePayloadJson" class="code-preview">{}</pre>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
