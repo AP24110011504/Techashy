@@ -46,7 +46,7 @@ export function ContainmentPage({
       setActionFeedback({
         type: pendingDecision === 'APPROVED' ? 'success' : 'info',
         message: pendingDecision === 'APPROVED'
-          ? 'Containment action ACT-ISO-PROD-DB executed. Network interfaces severed and IAM credentials revoked.'
+          ? 'Simulated containment action approved. No real network interfaces or IAM credentials were changed.'
           : 'Containment proposal rejected by SOC lead.'
       });
     }
