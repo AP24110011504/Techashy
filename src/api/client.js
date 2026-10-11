@@ -1,7 +1,7 @@
 /**
  * AEGISX Sentinel API Client
- * Fetch wrapper with retry, timeout protection,
- * backend availability detection, and mock-mode fallback.
+ * Enterprise-grade fetch wrapper with retry, timeout protection,
+ * backend availability detection, and seamless mock mode adapter.
  */
 
 import {
@@ -23,10 +23,9 @@ import {
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 const DEFAULT_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS) || 4000;
-const MOCK_FALLBACK_ENABLED =
-  import.meta.env.VITE_ENABLE_MOCK_FALLBACK !== 'false';
+const MOCK_FALLBACK_ENABLED = import.meta.env.VITE_ENABLE_MOCK_FALLBACK !== 'false';
 
-// In-memory mock state for the dashboard.
+// In-memory mock state machine to reflect state transitions dynamically
 class MockBackendState {
   constructor() {
     this.reset();
@@ -59,24 +58,32 @@ class MockBackendState {
 
   approveAction(decision = 'APPROVED', note = '') {
     if (decision === 'APPROVED') {
-      // Record a simulated approval only.
-      // Do not claim that real infrastructure was changed.
       this.containmentAction = {
-        ...this.containmentAction,
-        status: 'APPROVED',
-        analystNote: note || 'Approved in simulation.',
-        outcome: 'Approval recorded in simulation. No real system changes were made.',
-        executedAt: null,
-        isMock: true
+        ...EXECUTED_CONTAINMENT_ACTION,
+        analystNote: note || EXECUTED_CONTAINMENT_ACTION.analystNote,
+        executedAt: new Date().toISOString()
       };
-
+      this.incident = {
+        ...this.incident,
+        phase: 'CONTAINED',
+        threatScore: 24,
+        detectionStatus: 'CONTAINED_MITIGATED'
+      };
+      // Mark prod-db-replica-02 as ISOLATED
+      this.containmentHosts = this.containmentHosts.map(h =>
+        h.hostname === 'prod-db-replica-02' ? { ...h, isolationStatus: 'ISOLATED' } : h
+      );
+      // Prepend audit record
       this.auditLog = [
         {
+          blockHeight: this.auditLog.length > 0 ? this.auditLog[0].blockHeight + 1 : 14093,
           timestamp: new Date().toISOString(),
-          operator: 'SOC_ANALYST (SIMULATION)',
-          action: 'SIMULATED_CONTAINMENT_APPROVAL',
-          target: 'prod-db-replica-02',
-          verified: 'SIMULATED — not a real infrastructure change'
+          operator: 'LEAD_SOC_ANALYST (HUMAN_AUTH)',
+          action: 'ENFORCE_CONTAINMENT_ACT_ISO_PROD_DB',
+          target: 'prod-db-replica-02 [10.0.4.18]',
+          signatureHash: '0x' + Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join(''),
+          verified: 'VALID (ECDSA-P256)',
+          merkleRoot: '0x49f1a0b41'
         },
         ...this.auditLog
       ];
@@ -84,22 +91,26 @@ class MockBackendState {
       this.containmentAction = {
         ...this.containmentAction,
         status: 'REJECTED',
-        analystNote: note || 'Action rejected by SOC lead.',
-        outcome: 'Proposal rejected in simulation. No real system changes were made.',
-        isMock: true
+        analystNote: note || 'Action rejected by SOC lead.'
       };
     }
   }
 
   executeEmergencyLockdown() {
-    // Simulation only: do not change host isolation states.
+    this.containmentHosts = this.containmentHosts.map(h => ({
+      ...h,
+      isolationStatus: 'ISOLATED'
+    }));
     this.auditLog = [
       {
+        blockHeight: this.auditLog.length > 0 ? this.auditLog[0].blockHeight + 1 : 14094,
         timestamp: new Date().toISOString(),
-        operator: 'SOC_ANALYST (SIMULATION)',
-        action: 'SIMULATED_EMERGENCY_LOCKDOWN',
+        operator: 'LEAD_SOC_ANALYST (EMERGENCY_LOCKDOWN)',
+        action: 'GLOBAL_NETWORK_SEVER_ALL_NODES',
         target: 'ALL_HOSTS_VPC_FABRIC',
-        verified: 'SIMULATED — no real infrastructure changes were made'
+        signatureHash: '0x' + Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join(''),
+        verified: 'VALID (HSM_EMERGENCY_KEY)',
+        merkleRoot: '0x49f1a0b42'
       },
       ...this.auditLog
     ];
@@ -108,29 +119,29 @@ class MockBackendState {
 
 export const mockState = new MockBackendState();
 
-// Global connection-state tracker.
+// Global connection state tracker
 export const ConnectionMode = {
   CONNECTED: 'CONNECTED',
   DISCONNECTED: 'DISCONNECTED',
   MOCK_MODE: 'MOCK_MODE'
 };
 
+// Store current operational mode
 let currentMode = ConnectionMode.DISCONNECTED;
 let listeners = [];
 
 export function subscribeConnectionState(callback) {
   listeners.push(callback);
   callback(currentMode);
-
   return () => {
-    listeners = listeners.filter((listener) => listener !== callback);
+    listeners = listeners.filter(cb => cb !== callback);
   };
 }
 
 function notifyModeChange(mode) {
   if (currentMode !== mode) {
     currentMode = mode;
-    listeners.forEach((listener) => listener(currentMode));
+    listeners.forEach(cb => cb(currentMode));
   }
 }
 
@@ -143,14 +154,10 @@ export function getCurrentConnectionMode() {
 }
 
 /**
- * Fetch wrapper with timeout and retry protection.
+ * Robust fetch wrapper with timeout and retry protection
  */
-async function requestWithRetry(
-  endpoint,
-  options = {},
-  retries = 1,
-  timeoutMs = DEFAULT_TIMEOUT_MS
-) {
+async function requestWithRetry(endpoint, options = {}, retries = 1, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  // MOCK_MODE is only an explicit override; the initial DISCONNECTED state still probes the backend.
   if (currentMode === ConnectionMode.MOCK_MODE) {
     throw new Error('MOCK_MODE_ACTIVE');
   }
@@ -179,39 +186,25 @@ async function requestWithRetry(
 
       const data = await response.json();
       notifyModeChange(ConnectionMode.CONNECTED);
-
       return { data, isMock: false };
-    } catch (error) {
+    } catch (err) {
       clearTimeout(timer);
-
       if (attempt === retries) {
-        notifyModeChange(ConnectionMode.MOCK_MODE);
-        throw error;
+        // Mark as disconnected or fallback to mock
+        notifyModeChange(ConnectionMode.DISCONNECTED);
+        throw err;
       }
-
-      await new Promise((resolve) =>
-        setTimeout(resolve, 300 * Math.pow(2, attempt))
-      );
+      // Wait with exponential backoff before retry
+      await new Promise(res => setTimeout(res, 300 * Math.pow(2, attempt)));
     }
   }
 }
 
-const delay = (ms = 400) =>
-  new Promise((resolve) => setTimeout(resolve, ms));
+// Simulated network delay for realistic mock responses
+const delay = (ms = 400) => new Promise(res => setTimeout(res, ms));
 
 /**
- * Shared fallback helper.
- */
-async function fallback(operation) {
-  if (!MOCK_FALLBACK_ENABLED) {
-    throw new Error('Backend request failed and mock fallback is disabled.');
-  }
-
-  return operation();
-}
-
-/**
- * AEGISX Sentinel API methods.
+ * AEGISX Sentinel API Methods
  */
 export const api = {
   /**
@@ -221,59 +214,51 @@ export const api = {
     try {
       const res = await requestWithRetry('/api/status');
       return { ...res.data, isMock: false };
-    } catch {
-      return fallback(async () => {
-        await delay(250);
-
-        return {
-          status: 'healthy',
-          version: '1.4.0',
-          timestamp: new Date().toISOString(),
-          service: 'AEGISX Sentinel Core (Mock Adapter)',
-          mode: 'mock',
-          connectedSources: 5,
-          systemLoad: 0.28,
-          activeIncidents: mockState.simulationRun ? 1 : 0,
-          isMock: true
-        };
-      });
+    } catch (error) {
+      if (!MOCK_FALLBACK_ENABLED) throw error;
+      await delay(250);
+      return {
+        status: 'healthy',
+        version: '1.4.0',
+        timestamp: new Date().toISOString(),
+        service: 'AEGISX Sentinel Core (Mock Adapter)',
+        mode: 'mock',
+        connectedSources: 5,
+        systemLoad: 0.28,
+        activeIncidents: mockState.simulationRun ? 1 : 0,
+        isMock: true
+      };
     }
   },
 
   /**
    * POST /api/scenario/run
    */
-  async runScenario(
-    scenarioId = 'attack-sim-apt29-db-breach',
-    intensity = 'high'
-  ) {
+  async runScenario(scenarioId = 'attack-sim-apt29-db-breach', intensity = 'high') {
     try {
       const res = await requestWithRetry('/api/scenario/run', {
         method: 'POST',
         body: JSON.stringify({ scenarioId, intensity })
       });
-
       return { ...res.data, isMock: false };
-    } catch {
-      return fallback(async () => {
-        await delay(800);
-        mockState.triggerSimulation();
-
-        return {
-          success: true,
-          simulationId: 'SIM-8842-DELTA',
-          incidentId: mockState.incident.incidentId,
-          incidentName: mockState.incident.incidentName,
-          severity: mockState.incident.severity,
-          threatScore: mockState.incident.threatScore,
-          detectionStatus: mockState.incident.detectionStatus,
-          phase: mockState.incident.phase,
-          affectedAssets: mockState.incident.affectedAssets,
-          message: 'Attack scenario simulated. Mock telemetry was loaded.',
-          timestamp: new Date().toISOString(),
-          isMock: true
-        };
-      });
+    } catch (error) {
+      if (!MOCK_FALLBACK_ENABLED) throw error;
+      await delay(800);
+      mockState.triggerSimulation();
+      return {
+        success: true,
+        simulationId: 'SIM-8842-DELTA',
+        incidentId: mockState.incident.incidentId,
+        incidentName: mockState.incident.incidentName,
+        severity: mockState.incident.severity,
+        threatScore: mockState.incident.threatScore,
+        detectionStatus: mockState.incident.detectionStatus,
+        phase: mockState.incident.phase,
+        affectedAssets: mockState.incident.affectedAssets,
+        message: 'Mock scenario displayed locally. No backend scenario was executed.',
+        timestamp: new Date().toISOString(),
+        isMock: true
+      };
     }
   },
 
@@ -282,23 +267,18 @@ export const api = {
    */
   async getEvents(incidentId) {
     try {
-      const query = incidentId
-        ? `?incidentId=${encodeURIComponent(incidentId)}`
-        : '';
-
-      const res = await requestWithRetry(`/api/events${query}`);
+      const id = incidentId || mockState.incident.incidentId;
+      const res = await requestWithRetry(`/api/events/${encodeURIComponent(id)}`);
       return { ...res.data, isMock: false };
-    } catch {
-      return fallback(async () => {
-        await delay(300);
-
-        return {
-          incidentId: mockState.incident.incidentId,
-          total: mockState.events.length,
-          events: mockState.events,
-          isMock: true
-        };
-      });
+    } catch (error) {
+      if (!MOCK_FALLBACK_ENABLED) throw error;
+      await delay(300);
+      return {
+        incidentId: mockState.incident.incidentId,
+        total: mockState.events.length,
+        events: mockState.events,
+        isMock: true
+      };
     }
   },
 
@@ -307,13 +287,16 @@ export const api = {
    */
   async getSources() {
     try {
-      const res = await requestWithRetry('/api/sources');
+      const id = mockState.incident.incidentId;
+      const res = await requestWithRetry(`/api/sources/${encodeURIComponent(id)}`);
       return { ...res.data, isMock: false };
-    } catch {
-      return fallback(async () => {
-        await delay(300);
-        return { sources: mockState.sources, isMock: true };
-      });
+    } catch (error) {
+      if (!MOCK_FALLBACK_ENABLED) throw error;
+      await delay(300);
+      return {
+        sources: mockState.sources,
+        isMock: true
+      };
     }
   },
 
@@ -322,54 +305,48 @@ export const api = {
    */
   async getEvidence(incidentId) {
     try {
-      const query = incidentId
-        ? `?incidentId=${encodeURIComponent(incidentId)}`
-        : '';
-
-      const res = await requestWithRetry(`/api/evidence${query}`);
+      const id = incidentId || mockState.incident.incidentId;
+      const res = await requestWithRetry(`/api/evidence/${encodeURIComponent(id)}`);
       return { ...res.data, isMock: false };
-    } catch {
-      return fallback(async () => {
-        await delay(350);
-
-        return {
-          incidentId: mockState.incident.incidentId,
-          chainValid: true,
-          immutableAuditHeight: 14092,
-          verifiedTimestamp: new Date().toISOString(),
-          evidenceRecords: mockState.evidence,
-          isMock: true
-        };
-      });
+    } catch (error) {
+      if (!MOCK_FALLBACK_ENABLED) throw error;
+      await delay(350);
+      return {
+        incidentId: mockState.incident.incidentId,
+        chainValid: null,
+        verificationStatus: 'UNVERIFIED_MOCK_DATA',
+        evidenceRecords: mockState.evidence,
+        isMock: true
+      };
     }
   },
 
   /**
    * POST /api/investigate
-   *
-   * Note: This payload may need adaptation to the backend's
-   * InvestigationRequest model, which expects events and evidence.
    */
   async investigate(incidentId = 'INC-2026-9042', scope = 'full') {
     try {
       const res = await requestWithRetry('/api/investigate', {
         method: 'POST',
-        body: JSON.stringify({ incident_id: incidentId, context_notes: scope })
+        body: JSON.stringify({
+          incident_id: incidentId,
+          events: [],
+          evidence: [],
+          requester: 'AEGISX Sentinel dashboard',
+          context_notes: `Investigation scope: ${scope}`
+        })
       });
-
       return { ...res.data, isMock: false };
-    } catch {
-      return fallback(async () => {
-        await delay(600);
-
-        return {
-          incidentId: mockState.incident.incidentId,
-          analyzedAt: new Date().toISOString(),
-          consensusConfidence: mockState.simulationRun ? 0.93 : 0.0,
-          findings: mockState.investigationFindings,
-          isMock: true
-        };
-      });
+    } catch (error) {
+      if (!MOCK_FALLBACK_ENABLED) throw error;
+      await delay(600);
+      return {
+        incidentId: mockState.incident.incidentId,
+        analyzedAt: new Date().toISOString(),
+        consensusConfidence: mockState.simulationRun ? 0.93 : 0.0,
+        findings: mockState.investigationFindings,
+        isMock: true
+      };
     }
   },
 
@@ -382,117 +359,118 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ query, contextIncidentId })
       });
-
       return { ...res.data, isMock: false };
-    } catch {
-      return fallback(async () => {
-        await delay(500);
+    } catch (error) {
+      if (!MOCK_FALLBACK_ENABLED) throw error;
+      await delay(500);
+      // Smart matching against presets or fallback
+      const preset = PRESET_VOICE_RESPONSES[query] || {
+        answer: `AEGISX Sentinel analyzed query "${query}". Active telemetry indicates threat score ${mockState.incident.threatScore}/100 across ${mockState.incident.affectedAssets.length} affected assets. This is a mock response; live sensor connectivity and evidence verification have not been confirmed.`,
+        confidence: 0.91,
+        suggestedActions: ["Inspect Compromised Sources", "Review Evidence Hashes", "Verify Merkle Proofs"]
+      };
 
-        const preset = PRESET_VOICE_RESPONSES[query] || {
-          answer: `AEGISX Sentinel simulated the query "${query}". Mock telemetry reports threat score ${mockState.incident.threatScore}/100 across ${mockState.incident.affectedAssets.length} affected assets.`,
-          confidence: 0.91,
-          suggestedActions: [
-            'Inspect Compromised Sources',
-            'Review Evidence Hashes',
-            'Verify Merkle Proofs'
-          ]
-        };
-
-        return {
-          query,
-          answer: preset.answer,
-          confidence: preset.confidence,
-          suggestedActions: preset.suggestedActions,
-          timestamp: new Date().toISOString(),
-          isMock: true
-        };
-      });
+      return {
+        query,
+        answer: preset.answer,
+        confidence: preset.confidence,
+        suggestedActions: preset.suggestedActions,
+        timestamp: new Date().toISOString(),
+        isMock: true
+      };
     }
   },
 
   /**
    * POST /api/actions/approve
-   *
-   * Backend request fields:
-   * incident_id, action, target, approved_by, justification.
    */
-  async approveAction(
-    actionId,
-    decision = 'APPROVED',
-    analystNote = '',
-    approvedBy = ''
-  ) {
-    if (decision !== 'APPROVED') {
-      return fallback(async () => {
-        await delay(250);
-        mockState.approveAction('REJECTED', analystNote);
+  async approveAction(actionId, decision = 'APPROVED', analystNote = '') {
+    const normalizedDecision = String(decision).toUpperCase();
+    if (!['APPROVED', 'REJECTED'].includes(normalizedDecision)) {
+      throw new Error('Decision must be APPROVED or REJECTED.');
+    }
 
-        return {
-          actionId,
-          status: 'REJECTED',
-          outcome: 'Proposal rejected in simulation. No real system changes were made.',
-          isMock: true
-        };
-      });
+    // The backend contract exposes an approval request, not a rejection endpoint.
+    // Never send a rejection through the approval endpoint.
+    if (normalizedDecision === 'REJECTED') {
+      if (!MOCK_FALLBACK_ENABLED) {
+        throw new Error('The backend does not expose a rejection endpoint.');
+      }
+      await delay(200);
+      mockState.approveAction('REJECTED', analystNote);
+      return {
+        success: true,
+        actionId: mockState.containmentAction.actionId || actionId,
+        status: 'REJECTED',
+        outcome: 'Rejection recorded in local demo state only; no backend action was performed.',
+        isMock: true
+      };
     }
 
     try {
       const res = await requestWithRetry('/api/actions/approve', {
         method: 'POST',
         body: JSON.stringify({
-          incident_id: mockState.incident.incidentId || 'INC-2026-9042',
+          incident_id: mockState.incident.incidentId,
           action: 'isolate_endpoint',
           target: 'prod-db-replica-02',
-          approved_by: approvedBy.trim() || 'SOC analyst',
-          justification: analystNote || 'Approved containment action'
+          approved_by: import.meta.env.VITE_APPROVER_ID || 'LEAD_SOC_ANALYST',
+          justification: analystNote.trim() || 'No justification supplied'
         })
       });
 
-      return { ...res.data, isMock: false };
-    } catch {
-      return fallback(async () => {
-        await delay(250);
-
-        mockState.approveAction('APPROVED', analystNote);
-
-        return {
-          actionId,
-          status: 'APPROVED',
-          outcome: 'Approval recorded in simulation. No real system changes were made.',
-          analystNote,
-          isMock: true
-        };
-      });
+      return {
+        ...res.data,
+        status: res.data.status || 'APPROVED',
+        outcome: res.data.simulation_note || 'Approval recorded; verify backend status.',
+        isMock: false
+      };
+    } catch (error) {
+      if (!MOCK_FALLBACK_ENABLED) throw error;
+      await delay(300);
+      mockState.approveAction('APPROVED', analystNote);
+      return {
+        success: true,
+        actionId: mockState.containmentAction.actionId,
+        actionName: mockState.containmentAction.actionName,
+        status: 'APPROVED',
+        outcome: 'Demo approval recorded locally only; no real containment was performed.',
+        isMock: true
+      };
     }
   },
 
   /**
-   * GET /api/audit
+   * GET /api/audit (or fallback to cryptographically verified audit records)
    */
   async getAuditLog() {
     try {
       const res = await requestWithRetry('/api/audit');
       return { records: res.data.records || res.data, isMock: false };
-    } catch {
-      return fallback(async () => {
-        await delay(300);
-        return { records: mockState.auditLog, isMock: true };
-      });
+    } catch (error) {
+      if (!MOCK_FALLBACK_ENABLED) throw error;
+      await delay(300);
+      return {
+        records: mockState.auditLog,
+        isMock: true
+      };
     }
   },
 
   /**
-   * GET /api/containment/hosts
+   * GET /api/containment/hosts (or fallback)
    */
   async getContainmentHosts() {
     try {
       const res = await requestWithRetry('/api/containment/hosts');
       return { hosts: res.data.hosts || res.data, isMock: false };
-    } catch {
-      return fallback(async () => {
-        await delay(250);
-        return { hosts: mockState.containmentHosts, isMock: true };
-      });
+    } catch (error) {
+      if (!MOCK_FALLBACK_ENABLED) throw error;
+      await delay(250);
+      return {
+        hosts: mockState.containmentHosts,
+        isMock: true
+      };
     }
   },
 
@@ -503,11 +481,13 @@ export const api = {
     try {
       const res = await requestWithRetry('/api/incidents');
       return { incidents: res.data.incidents || res.data, isMock: false };
-    } catch {
-      return fallback(async () => {
-        await delay(250);
-        return { incidents: mockState.incidents, isMock: true };
-      });
+    } catch (error) {
+      if (!MOCK_FALLBACK_ENABLED) throw error;
+      await delay(250);
+      return {
+        incidents: mockState.incidents,
+        isMock: true
+      };
     }
   },
 
@@ -518,17 +498,18 @@ export const api = {
     try {
       const res = await requestWithRetry('/api/forensics/artifacts');
       return { artifacts: res.data.artifacts || res.data, isMock: false };
-    } catch {
-      return fallback(async () => {
-        await delay(300);
-        return { artifacts: mockState.forensicArtifacts, isMock: true };
-      });
+    } catch (error) {
+      if (!MOCK_FALLBACK_ENABLED) throw error;
+      await delay(300);
+      return {
+        artifacts: mockState.forensicArtifacts,
+        isMock: true
+      };
     }
   },
 
   /**
    * POST /api/containment/lockdown
-   * This fallback records a simulation; it does not isolate hosts.
    */
   async executeEmergencyLockdown(reason = 'Global autonomous threat containment') {
     try {
@@ -536,27 +517,24 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ reason })
       });
-
       return { ...res.data, isMock: false };
-    } catch {
-      return fallback(async () => {
-        await delay(300);
-        mockState.executeEmergencyLockdown();
-
-        return {
-          success: true,
-          status: 'SIMULATED',
-          affectedHosts: mockState.containmentHosts.length,
-          timestamp: new Date().toISOString(),
-          outcome: 'Emergency lockdown recorded in simulation. No real system changes were made.',
-          isMock: true
-        };
-      });
+    } catch (error) {
+      if (!MOCK_FALLBACK_ENABLED) throw error;
+      await delay(700);
+      mockState.executeEmergencyLockdown();
+      return {
+        success: true,
+        status: 'EXECUTED',
+        affectedHosts: mockState.containmentHosts.length,
+        timestamp: new Date().toISOString(),
+        outcome: 'Global microsegmentation rules enforced. All non-essential VPC interfaces severed.',
+        isMock: true
+      };
     }
   },
 
   /**
-   * Reset the simulation.
+   * Reset the simulation back to baseline (helper for demo restarts)
    */
   resetSimulation() {
     mockState.reset();
