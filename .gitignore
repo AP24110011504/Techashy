@@ -1,8 +1,17 @@
+```gitignore
 __pycache__/
 *.py[cod]
 .venv/
 venv/
 .env
-data/
-*.db
+.env.*
+!.env.example
 
+# Generated Python package metadata
+*.egg-info/
+
+# Frontend build output
+node_modules/
+dist/
+.vercel/
+```

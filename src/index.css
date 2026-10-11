@@ -1,0 +1,89 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --brand-red: #C9362B;
+    --alert-red: #D9362B;
+    --deep-red: #B92F26;
+    --pale-red: #FFF1F0;
+    --page-bg: #FBF9FA;
+    --card-bg: #FFFFFF;
+    --surface-subtle: #F5F5F9;
+    --text-navy: #172033;
+    --text-secondary: #718096;
+    --text-muted: #8995AA;
+    --border-color: #E1E5ED;
+    --healthy-green: #4F9D60;
+    --warning-amber: #D97706;
+    --slate-icon: #718096;
+  }
+
+  body {
+    background-color: #FBF9FA;
+    color: #172033;
+    font-family: 'Plus Jakarta Sans', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    letter-spacing: -0.01em;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    color: #172033;
+    letter-spacing: -0.02em;
+  }
+
+  code, pre, .font-mono {
+    font-family: 'Geist Mono', 'JetBrains Mono', 'Fira Code', monospace;
+    font-feature-settings: 'tnum', 'zero';
+    letter-spacing: -0.015em;
+  }
+}
+
+/* Custom SOC Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #FBF9FA;
+}
+::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
+
+/* Card and Surface Classes */
+.soc-card {
+  background-color: #FFFFFF;
+  border: 1px solid #E1E5ED;
+  border-radius: 0.875rem; /* ~14px */
+  box-shadow: 0 1px 3px 0 rgba(23, 32, 51, 0.04), 0 1px 2px -1px rgba(23, 32, 51, 0.02);
+}
+
+.soc-card-critical {
+  background-color: #FFFFFF;
+  border: 1px solid #FCA5A5;
+  border-radius: 0.875rem;
+  box-shadow: 0 1px 4px 0 rgba(201, 54, 43, 0.08);
+}
+
+.soc-subtle-card {
+  background-color: #F5F5F9;
+  border: 1px solid #E1E5ED;
+  border-radius: 0.75rem;
+}
+
+/* Pulse animation for live danger */
+@keyframes danger-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(1.05); }
+}
+
+.animate-danger-pulse {
+  animation: danger-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
