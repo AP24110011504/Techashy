@@ -408,6 +408,46 @@ class TestEvidenceReviewAgent:
         result = evidence_review_agent.run(req.events, req.evidence)
         assert len(result["uncertainty_notes"]) > 0
 
+    def test_mismatched_hashes_overrides_client_supplied_verified_status(self):
+        """Regression test: Mismatched hashes must be classified as tampered,
+        even if the client supplied verification_status=VERIFIED and signature_valid=True.
+        """
+        ev = _evt("E01", 0, EventType.AUTH_FAILURE, Severity.HIGH, "test")
+        rec = EvidenceRecord(
+            evidence_id="EV01",
+            event_id="E01",
+            sha256_hash="a" * 64,
+            expected_hash="b" * 64,  # mismatch
+            signature_valid=True,
+            verification_status=VerificationStatus.VERIFIED,  # deceptive status
+        )
+        result = evidence_review_agent.run([ev], [rec])
+        assert "E01" in result["tampered_event_ids"]
+        assert "E01" not in result["verified_event_ids"]
+        assert result["ev_map"]["E01"]["verification_status"] == VerificationStatus.TAMPERED.value
+
+    def test_matching_hashes_are_verified(self):
+        """Test that matching hashes and valid signature are classified as verified."""
+        ev = _evt("E02", 0, EventType.AUTH_FAILURE, Severity.HIGH, "test")
+        rec = EvidenceRecord(
+            evidence_id="EV02",
+            event_id="E02",
+            sha256_hash="c" * 64,
+            expected_hash="c" * 64,  # match
+            signature_valid=True,
+            verification_status=VerificationStatus.VERIFIED,
+        )
+        result = evidence_review_agent.run([ev], [rec])
+        assert "E02" in result["verified_event_ids"]
+        assert result["tampered_event_ids"] == []
+
+    def test_missing_evidence_handled_correctly(self):
+        """Test that missing evidence puts the event in missing_event_ids."""
+        ev = _evt("E03", 0, EventType.AUTH_FAILURE, Severity.HIGH, "test")
+        result = evidence_review_agent.run([ev], [])
+        assert "E03" in result["missing_event_ids"]
+        assert result["ev_map"]["E03"] is None
+
 
 # ============================================================================
 # Unit: InvestigationAgent

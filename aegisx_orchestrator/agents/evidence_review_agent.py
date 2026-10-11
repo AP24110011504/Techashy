@@ -12,6 +12,7 @@ STRICT CONTRACT:
 
 from __future__ import annotations
 
+import hmac
 from typing import Any, Dict, List
 
 from ..models import EvidenceRecord, SecurityEvent, VerificationStatus
@@ -49,28 +50,60 @@ def run(
             )
             continue
 
-        ev_map[ev.event_id] = rec.model_dump()
+        rec_data = rec.model_dump()
 
-        if rec.verification_status == VerificationStatus.TAMPERED:
+        # Independently verify cryptographic integrity rather than blindly trusting client status
+        has_hashes = bool(rec.sha256_hash and rec.expected_hash)
+        hashes_match = False
+        hash_mismatch = False
+
+        if has_hashes:
+            hashes_match = hmac.compare_digest(
+                str(rec.sha256_hash).strip().lower(),
+                str(rec.expected_hash).strip().lower(),
+            )
+            hash_mismatch = not hashes_match
+
+        signature_failed = rec.signature_valid is False
+
+        # Treat hash mismatch or failed signature as tampered evidence
+        if hash_mismatch or signature_failed or rec.verification_status == VerificationStatus.TAMPERED:
             tampered.append(ev.event_id)
+            rec_data["verification_status"] = VerificationStatus.TAMPERED.value
+            ev_map[ev.event_id] = rec_data
+
+            if hash_mismatch:
+                reason = "SHA-256 hash mismatch between observed and expected hash"
+            elif signature_failed:
+                reason = "invalid digital signature"
+            else:
+                reason = rec.verifier_note or "hash mismatch"
+
             uncertainty.append(
-                f"Event {ev.event_id} EVIDENCE TAMPERED — "
-                f"hash mismatch. Contents must NOT be trusted. "
-                f"Verifier note: {rec.verifier_note or 'none'}"
+                f"Event {ev.event_id} EVIDENCE TAMPERED — {reason}. "
+                "Contents must NOT be trusted."
             )
         elif rec.verification_status == VerificationStatus.MISSING:
             missing.append(ev.event_id)
+            ev_map[ev.event_id] = rec_data
             uncertainty.append(
                 f"Event {ev.event_id} marked MISSING by Person 2's verifier."
             )
-        elif rec.verification_status == VerificationStatus.UNVERIFIABLE:
+        elif rec.verification_status == VerificationStatus.UNVERIFIABLE or not has_hashes:
             unverifiable.append(ev.event_id)
+            rec_data["verification_status"] = VerificationStatus.UNVERIFIABLE.value
+            ev_map[ev.event_id] = rec_data
             uncertainty.append(
                 f"Event {ev.event_id} UNVERIFIABLE — "
-                f"{rec.verifier_note or 'no detail provided'}."
+                f"{rec.verifier_note or 'missing hash data for independent verification'}."
             )
-        else:
+        elif hashes_match:
             verified.append(ev.event_id)
+            ev_map[ev.event_id] = rec_data
+        else:
+            unverifiable.append(ev.event_id)
+            rec_data["verification_status"] = VerificationStatus.UNVERIFIABLE.value
+            ev_map[ev.event_id] = rec_data
 
     return {
         "ev_map":                ev_map,
