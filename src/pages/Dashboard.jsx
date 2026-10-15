@@ -85,7 +85,7 @@ export function Dashboard() {
         hasSimulated={hasEvents}
       />
 
-      {/* SECTION 1 — SOURCE HEALTH ROW */}
+      {/* SECTION 1 â€” SOURCE HEALTH ROW */}
       <section className="mb-4">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
@@ -95,7 +95,7 @@ export function Dashboard() {
             </h2>
           </div>
           <span className="text-[11px] font-mono text-text-secondary">
-            5 / 5 Ingestion Feeds Active
+            {sources.length} Sources Reported
           </span>
         </div>
 
@@ -112,7 +112,7 @@ export function Dashboard() {
         {/* LEFT COLUMN: PRIMARY VISUAL ELEMENTS (TIMELINE & INVESTIGATION) */}
         <div className="lg:col-span-7 space-y-4">
 
-          {/* SECTION 3 — ATTACK TIMELINE (PRIMARY VISUAL ELEMENT) */}
+          {/* SECTION 3 â€” ATTACK TIMELINE (PRIMARY VISUAL ELEMENT) */}
           <section className="soc-card p-4">
             <div className="flex items-center justify-between pb-3 mb-3 border-b border-border/60">
               <div className="flex items-center gap-2">
@@ -143,13 +143,13 @@ export function Dashboard() {
               </div>
             ) : (
               <EmptyState
-                title="Timeline Nominal — No Attack Activity"
+                title="No Events Returned by Backend"
                 message="Click 'Run Attack Simulation' to inject telemetry events across IAM, EDR, Host, and Database sensors."
               />
             )}
           </section>
 
-          {/* SECTION 5 — MULTI-AGENT INVESTIGATION */}
+          {/* SECTION 5 â€” MULTI-AGENT INVESTIGATION */}
           <section className="soc-card p-4">
             <div className="flex items-center justify-between pb-3 mb-3 border-b border-border/60">
               <div className="flex items-center gap-2">
@@ -187,7 +187,7 @@ export function Dashboard() {
         {/* RIGHT COLUMN: EXECUTIVE SUMMARY, DECISION, EVIDENCE, AND ANALYST CONSOLE */}
         <div className="lg:col-span-5 space-y-4">
 
-          {/* SECTION 2 — INCIDENT SUMMARY */}
+          {/* SECTION 2 â€” INCIDENT SUMMARY */}
           <section>
             <div className="flex items-center gap-2 mb-2">
               <ShieldAlert className="w-4 h-4 text-accent" />
@@ -198,7 +198,7 @@ export function Dashboard() {
             <IncidentSummaryCard incident={incident} />
           </section>
 
-          {/* SECTION 7 — CONTAINMENT DECISION */}
+          {/* SECTION 7 â€” CONTAINMENT DECISION */}
           <section className="soc-card p-4">
             <div className="flex items-center justify-between pb-3 mb-3 border-b border-border/60">
               <div className="flex items-center gap-2">
@@ -221,7 +221,7 @@ export function Dashboard() {
             />
           </section>
 
-          {/* SECTION 4 — EVIDENCE VERIFICATION */}
+          {/* SECTION 4 â€” EVIDENCE VERIFICATION */}
           <section className="soc-card p-4">
             <div className="flex items-center justify-between pb-3 mb-3 border-b border-border/60">
               <div className="flex items-center gap-2">
@@ -237,7 +237,7 @@ export function Dashboard() {
               </div>
               <div className="flex items-center gap-1.5 text-xs font-mono text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-500/20">
                 <Lock className="w-3 h-3" />
-                <span>Merkle Chain: {chainValid ? 'Intact' : 'Warning'}</span>
+                <span>Merkle Chain: {chainValid === true ? 'Verified' : chainValid === false ? 'Warning' : 'Unverified'}</span>
               </div>
             </div>
 
@@ -255,7 +255,7 @@ export function Dashboard() {
             )}
           </section>
 
-          {/* SECTION 6 — ASK AEGISX ANALYST CONSOLE */}
+          {/* SECTION 6 â€” ASK AEGISX ANALYST CONSOLE */}
           <section className="soc-card p-4">
             <AskAegisConsole
               history={voiceHistory}
@@ -272,13 +272,13 @@ export function Dashboard() {
       <footer className="mt-8 pt-4 border-t border-border text-center text-xs font-mono text-text-secondary flex flex-col sm:flex-row items-center justify-between gap-2">
         <div>
           <span>AEGISX Sentinel // Autonomous SOC First Responder</span>
-          <span className="mx-2">•</span>
+          <span className="mx-2">â€¢</span>
           <span>Hackathon Demo Edition</span>
         </div>
         <div className="flex items-center gap-3">
           <span className="inline-flex items-center gap-1">
             <span className="w-2 h-2 rounded-full bg-emerald-500" />
-            Zero Hardcoded Telemetry
+            Live API · Demo Events
           </span>
           <span className="text-border">|</span>
           <span>Light Enterprise SOC Theme</span>

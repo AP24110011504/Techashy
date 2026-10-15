@@ -1,15 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
-import { api, subscribeConnectionState, ConnectionMode, forceConnectionMode } from '../api/client';
 
-const INITIAL_VOICE_HISTORY = [
-  {
-    query: "What is the blast radius and which servers are affected?",
-    answer: "The blast radius is currently constrained to the US-East VPC: prod-db-replica-02 and auth-srv-us-east-1. The primary database cluster remains unbreached, but egress exfiltration is actively attempting cross-VPC traversal via IAM service credentials. Recommended containment will prevent lateral spread with zero expected customer downtime.",
-    confidence: 0.96,
-    suggestedActions: ["Quarantine Replica Node", "Revoke IAM Credentials", "Freeze Replication Pipeline"],
-    timestamp: "2026-10-10T10:59:45Z"
-  }
-];
+import { useState, useEffect, useCallback } from 'react';
+import { api, subscribeConnectionState, ConnectionMode } from '../api/client';
+
+const INCIDENT_ID = 'INC-BRUTEFORCE-DEMO';
 
 export function useSentinel() {
   const [status, setStatus] = useState(null);
@@ -17,247 +10,110 @@ export function useSentinel() {
   const [incident, setIncident] = useState(null);
   const [events, setEvents] = useState([]);
   const [evidence, setEvidence] = useState([]);
-  const [chainValid, setChainValid] = useState(true);
+  const [chainValid, setChainValid] = useState(null);
   const [investigations, setInvestigations] = useState([]);
   const [containmentAction, setContainmentAction] = useState(null);
-  const [auditLog, setAuditLog] = useState([]);
-  const [containmentHosts, setContainmentHosts] = useState([]);
-  const [incidentsList, setIncidentsList] = useState([]);
-  const [forensicArtifacts, setForensicArtifacts] = useState([]);
-  const [voiceHistory, setVoiceHistory] = useState(INITIAL_VOICE_HISTORY);
-
+  const [auditLog] = useState([]);
+  const [containmentHosts] = useState([]);
+  const [incidentsList] = useState([]);
+  const [forensicArtifacts] = useState([]);
+  const [voiceHistory] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [isSimulating, setIsSimulating] = useState(false);
-  const [simulationResult, setSimulationResult] = useState(null);
+  const [isSimulating] = useState(false);
+  const [simulationResult] = useState(null);
   const [isApproving, setIsApproving] = useState(false);
-  const [isLockingDown, setIsLockingDown] = useState(false);
-  const [isQueryingVoice, setIsQueryingVoice] = useState(false);
-  const [connectionMode, setConnectionMode] = useState(ConnectionMode.MOCK_MODE);
-  const [isMockData, setIsMockData] = useState(true);
+  const [isLockingDown] = useState(false);
+  const [isQueryingVoice] = useState(false);
+  const [connectionMode, setConnectionMode] = useState(ConnectionMode.DISCONNECTED);
   const [error, setError] = useState(null);
 
-  // Subscribe to connection mode changes
-  useEffect(() => {
-    const unsubscribe = subscribeConnectionState(mode => {
-      setConnectionMode(mode);
-      setIsMockData(mode === ConnectionMode.MOCK_MODE);
-    });
-    return unsubscribe;
-  }, []);
+  useEffect(() => subscribeConnectionState(setConnectionMode), []);
 
-  // Fetch all dashboard data
   const fetchData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
-      setError(null);
+      const statusRes = await api.getStatus();
+      setStatus(statusRes);
 
-      const [
-        statusRes,
-        sourcesRes,
-        eventsRes,
-        evidenceRes,
-        investRes,
-        auditRes,
-        hostsRes,
-        incidentsRes,
-        artifactsRes
-      ] = await Promise.all([
-        api.getStatus(),
-        api.getSources(),
-        api.getEvents(),
-        api.getEvidence(),
-        api.investigate(),
-        api.getAuditLog(),
-        api.getContainmentHosts(),
-        api.getIncidents(),
-        api.getForensicArtifacts()
+      const [eventsRes, sourcesRes, evidenceRes] = await Promise.all([
+        api.getEvents(INCIDENT_ID),
+        api.getSources(INCIDENT_ID),
+        api.getEvidence(INCIDENT_ID),
       ]);
 
-      setStatus(statusRes);
+      const actualEvents = eventsRes.events || eventsRes.timeline || [];
+      setEvents(actualEvents);
       setSources(sourcesRes.sources || []);
-      setEvents(eventsRes.events || []);
-      setEvidence(evidenceRes.evidenceRecords || []);
-      setChainValid(evidenceRes.chainValid !== false);
-      setInvestigations(investRes.findings || []);
-      setAuditLog(auditRes.records || []);
-      setContainmentHosts(hostsRes.hosts || []);
-      setIncidentsList(incidentsRes.incidents || []);
-      setForensicArtifacts(artifactsRes.artifacts || []);
+      setEvidence(evidenceRes.evidenceRecords || evidenceRes.evidence || []);
+      setChainValid(
+        typeof evidenceRes.chainValid === 'boolean'
+          ? evidenceRes.chainValid
+          : null
+      );
 
-      // If simulated events exist, synthesize incident details
-      if (eventsRes.events && eventsRes.events.length > 0) {
-        setIncident({
-          incidentId: eventsRes.incidentId || 'INC-2026-9042',
-          incidentName: 'APT-29 Identity Compromise & Bulk DB Exfiltration',
-          severity: 'CRITICAL',
-          detectionStatus: 'ACTIVE_INVESTIGATION',
-          threatScore: 87,
-          affectedAssets: ['auth-srv-us-east-1', 'prod-db-replica-02', 'iam-admin-vault'],
-          phase: 'CONTAINMENT_PENDING'
-        });
+      setIncident(actualEvents.length ? {
+        incidentId: eventsRes.incidentId || INCIDENT_ID,
+        events: actualEvents,
+        severity: actualEvents.some(e => String(e.severity).toUpperCase() === 'CRITICAL')
+          ? 'CRITICAL'
+          : actualEvents.some(e => String(e.severity).toUpperCase() === 'HIGH')
+            ? 'HIGH'
+            : 'UNKNOWN',
+        detectionStatus: 'OBSERVED',
+      } : null);
+
+      if (actualEvents.length) {
+        const report = await api.investigate(INCIDENT_ID);
+        setInvestigations(report.findings || []);
       } else {
-        setIncident({
-          incidentId: 'INC-2026-9040',
-          incidentName: 'Baseline SOC Monitoring — No Active Threat',
-          severity: 'LOW',
-          detectionStatus: 'IDLE_MONITORING',
-          threatScore: 12,
-          affectedAssets: ['All hosts nominal (0 infected)'],
-          phase: 'NOMINAL'
-        });
+        setInvestigations([]);
       }
-
-      setContainmentAction({
-        actionId: 'ACT-ISO-PROD-DB',
-        actionName: 'Isolate Database Read Replica and Revoke IAM Session',
-        status: 'PENDING',
-        riskReduction: '85%',
-        potentialImpact: 'Read traffic automatically reroutes to backup cluster. Expected read query latency increase < 45ms.',
-        analystNote: 'Awaiting human authorization before enforcing network isolation.'
-      });
-
-      setIsMockData(Boolean(statusRes.isMock || sourcesRes.isMock));
     } catch (err) {
-      console.error('Failed to load dashboard data:', err);
-      setError('Telemetry feed degraded or backend unavailable.');
+      setError(err.message || 'Unable to load live backend data.');
+      setIncident(null);
+      setInvestigations([]);
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // Initial load
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
-  // Run attack simulation
   const runSimulation = async () => {
-    setIsSimulating(true);
-    setSimulationResult(null);
-    try {
-      const res = await api.runScenario('attack-sim-apt29-db-breach', 'high');
-      setSimulationResult(res);
-      // Immediately reload telemetry
-      await fetchData();
-    } catch (err) {
-      console.error('Simulation error:', err);
-      setError('Simulation failed to trigger.');
-    } finally {
-      setIsSimulating(false);
-    }
+    setError('Scenario simulation is unavailable: the backend has no simulation endpoint.');
   };
 
-  // Human approval of containment
   const approveAction = async (decision = 'APPROVED', note = '') => {
-    setIsApproving(true);
-    try {
-      const res = await api.approveAction('ACT-ISO-PROD-DB', decision, note);
-      setContainmentAction(res);
-      // Reload audit & hosts
-      const [auditRes, hostsRes] = await Promise.all([
-        api.getAuditLog(),
-        api.getContainmentHosts()
-      ]);
-      setAuditLog(auditRes.records || []);
-      setContainmentHosts(hostsRes.hosts || []);
-
-      if (decision === 'APPROVED') {
-        setIncident(prev => prev ? {
-          ...prev,
-          phase: 'CONTAINED',
-          threatScore: 24,
-          detectionStatus: 'CONTAINED_MITIGATED'
-        } : null);
-      }
-    } catch (err) {
-      console.error('Action approval error:', err);
-      setError('Failed to record containment decision.');
-    } finally {
-      setIsApproving(false);
+    if (decision !== 'APPROVED') {
+      setError('The backend approval API currently records approved actions only.');
+      return;
     }
+    setError('Approval needs an explicit action, target, approver identity, and justification. No action was sent.');
   };
 
-  // Emergency lockdown trigger
-  const triggerEmergencyLockdown = async (reason = 'Global emergency quarantine') => {
-    setIsLockingDown(true);
-    try {
-      const res = await api.executeEmergencyLockdown(reason);
-      const [auditRes, hostsRes] = await Promise.all([
-        api.getAuditLog(),
-        api.getContainmentHosts()
-      ]);
-      setAuditLog(auditRes.records || []);
-      setContainmentHosts(hostsRes.hosts || []);
-      return res;
-    } catch (err) {
-      console.error('Lockdown error:', err);
-      setError('Failed to enforce emergency lockdown.');
-    } finally {
-      setIsLockingDown(false);
-    }
+  const triggerEmergencyLockdown = async () => {
+    setError('Emergency lockdown endpoint is not implemented. No system was isolated.');
   };
 
-  // Natural language query ("Ask AEGISX")
-  const askAegis = async (queryText) => {
-    if (!queryText.trim()) return;
-    setIsQueryingVoice(true);
-    try {
-      const res = await api.queryVoice(queryText, incident?.incidentId);
-      setVoiceHistory(prev => [res, ...prev]);
-      return res;
-    } catch (err) {
-      console.error('Query error:', err);
-      setError('Investigation query failed.');
-    } finally {
-      setIsQueryingVoice(false);
-    }
+  const askAegis = async () => {
+    setError('Voice query endpoint is not implemented by the backend.');
   };
 
-  // Reset to initial baseline
   const resetSimulation = async () => {
-    api.resetSimulation();
-    setSimulationResult(null);
     await fetchData();
   };
 
-  // Toggle mock mode manually
   const toggleMockMode = () => {
-    if (connectionMode === ConnectionMode.MOCK_MODE) {
-      forceConnectionMode(ConnectionMode.CONNECTED);
-    } else {
-      forceConnectionMode(ConnectionMode.MOCK_MODE);
-    }
-    fetchData();
+    setError('Mock mode has been removed. The dashboard uses the real backend only.');
   };
 
   return {
-    status,
-    sources,
-    incident,
-    events,
-    evidence,
-    chainValid,
-    investigations,
-    containmentAction,
-    auditLog,
-    containmentHosts,
-    incidentsList,
-    forensicArtifacts,
-    voiceHistory,
-    loading,
-    isSimulating,
-    simulationResult,
-    isApproving,
-    isLockingDown,
-    isQueryingVoice,
-    connectionMode,
-    isMockData,
-    error,
-    refreshAll: fetchData,
-    runSimulation,
-    approveAction,
-    triggerEmergencyLockdown,
-    askAegis,
-    resetSimulation,
-    toggleMockMode
+    status, sources, incident, events, evidence, chainValid, investigations,
+    containmentAction, auditLog, containmentHosts, incidentsList, forensicArtifacts,
+    voiceHistory, loading, isSimulating, simulationResult, isApproving,
+    isLockingDown, isQueryingVoice, connectionMode,
+    isMockData: false, error, refreshAll: fetchData, runSimulation,
+    approveAction, triggerEmergencyLockdown, askAegis, resetSimulation, toggleMockMode,
   };
 }
